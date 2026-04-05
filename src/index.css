@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-bg: #0b1020;
+  --color-brand-muted: #aab4d6;
+  --color-brand-primary: #eef2ff;
+  --color-glass-border: rgba(255, 255, 255, 0.07);
+  --color-violet-accent: #7c3aed;
+  --color-sky-accent: #38bdf8;
+  --color-amber-accent: #f59e0b;
+  --color-emerald-accent: #10b981;
+  --font-inter: 'Inter', sans-serif;
+  --radius-32: 32px;
+  --shadow-glass: 0 20px 60px rgba(0, 0, 0, 0.35);
+  --shadow-glow-white: 0 0 12px rgba(255, 255, 255, 0.3);
+  --shadow-glow-success: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+@layer base {
+  body {
+    @apply bg-[#0b1020] text-[#eef2ff] font-inter antialiased min-h-screen selection:bg-violet-500/30 selection:text-white;
+    background-image: 
+      radial-gradient(at top left, rgba(124, 58, 237, 0.14), transparent 50%),
+      radial-gradient(at top right, rgba(56, 189, 248, 0.10), transparent 50%);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-[rgba(22,31,63,0.6)] backdrop-blur-[14px] border border-[rgba(255,255,255,0.07)] shadow-[0_20px_60px_rgba(0,0,0,0.35)] rounded-[32px];
+  }
+
+  .liquid-glass {
+    @apply bg-gradient-to-br from-white/10 to-white/0 backdrop-blur-[12px] border border-white/12;
+  }
+
+  .nav-pill {
+    @apply bg-white/5 backdrop-blur-[16px] border border-white/10 rounded-full;
+  }
+
+  .progress-track {
+    @apply h-[6px] bg-white/5 rounded-full overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.3)] rounded-full transition-all duration-500;
+  }
+
+  .checkbox-custom {
+    @apply w-7 h-7 rounded-[8px] border border-white/15 cursor-pointer transition-all duration-200 flex items-center justify-center;
+  }
+
+  .checkbox-custom.checked {
+    @apply bg-[#10b981] border-[#34d399] shadow-[0_0_15px_rgba(16,185,129,0.4)];
+  }
+
+  /* Light Mode Overrides */
+  .light {
+    @apply bg-[#f4f7ff] text-[#0b1020];
+    background-image: none;
+  }
+
+  .light .glass-card {
+    @apply bg-white border-[#eef2ff] shadow-sm;
+  }
+
+  .light .liquid-glass {
+    @apply bg-white/50 border-[#eef2ff];
+  }
+
+  .light .nav-pill {
+    @apply bg-white border-[#eef2ff] text-[#0b1020];
+  }
+}
+
+/* Material Symbols alignment */
+.material-symbols-outlined {
+  font-variation-settings:
+  'FILL' 1,
+  'wght' 400,
+  'GRAD' 0,
+  'opsz' 24;
+  vertical-align: middle;
+}
