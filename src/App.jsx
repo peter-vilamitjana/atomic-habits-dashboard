@@ -1,1337 +1,719 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-// ============================================================
-// CONSTANTS
-// ============================================================
+// ─────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────
 
-const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-
-const DEFAULT_HABITS = [
-  {
-    id: 'habit-madrugar',
-    name: 'Madrugar',
-    description: 'Levantarme temprano y dormir temprano',
-    metrics: ['Celular afuera del cuarto', 'De pie con la primera alarma', 'En cama a horario'],
-    isDefault: true,
+const TRACKER_CONFIG = {
+  madrugar: {
+    rows: [
+      { key: 'phone', label: 'Celular afuera', sub: 'a la hora objetivo' },
+      { key: 'up',    label: 'De pie con la primera alarma', sub: 'sin negociar' },
+      { key: 'bed',   label: 'En cama dentro del rango', sub: 'cerrar bien la noche' },
+    ],
   },
-  {
-    id: 'habit-cocina',
-    name: 'Cocina',
-    description: 'Limpieza y orden de cocina',
-    metrics: ['Cocina lista antes de dormir', 'Desayuno preparado', 'Cierre en 10 min o menos'],
-    isDefault: true,
-  },
-];
-
-const TEMPLATES = {
-  study: {
-    label: '📚 Estudio',
-    tipo: 'Construir',
-    habito: 'Estudiar 30 minutos al día',
-    identidad: 'Soy alguien que aprende todos los días',
-    porQue: 'Quiero crecer profesional y personalmente',
-    lineaBase: '',
-    friccion1: '',
-    friccion2: '',
-    friccion3: '',
-    desencadenantes: '',
-    tiempo: '',
-    restricciones: '',
-    entorno: '',
-    recompensa: '',
-    responsabilidad: '',
-    metrics: ['Sesión iniciada', '30 min completados', 'Repaso rápido hecho'],
-  },
-  room: {
-    label: '🏠 Orden de habitación',
-    tipo: 'Construir',
-    habito: 'Ordenar mi habitación antes de dormir',
-    identidad: 'Soy alguien que cuida su entorno',
-    porQue: 'Un espacio ordenado me da claridad mental',
-    lineaBase: '',
-    friccion1: '',
-    friccion2: '',
-    friccion3: '',
-    desencadenantes: '',
-    tiempo: '',
-    restricciones: '',
-    entorno: '',
-    recompensa: '',
-    responsabilidad: '',
-    metrics: ['Ropa en su lugar', 'Escritorio despejado', 'Cama hecha'],
-  },
-  running: {
-    label: '🏃 Running / Movimiento',
-    tipo: 'Construir',
-    habito: 'Salir a correr o moverme 20 minutos',
-    identidad: 'Soy alguien activo que cuida su cuerpo',
-    porQue: 'Quiero más energía y salud a largo plazo',
-    lineaBase: '',
-    friccion1: '',
-    friccion2: '',
-    friccion3: '',
-    desencadenantes: '',
-    tiempo: '',
-    restricciones: '',
-    entorno: '',
-    recompensa: '',
-    responsabilidad: '',
-    metrics: ['Zapatillas puestas', 'Salí de casa', '20 min completados'],
-  },
-  reading: {
-    label: '📖 Lectura',
-    tipo: 'Construir',
-    habito: 'Leer 10 páginas por día',
-    identidad: 'Soy alguien que lee todos los días',
-    porQue: 'Quiero aprender más y desconectarme de pantallas',
-    lineaBase: '',
-    friccion1: '',
-    friccion2: '',
-    friccion3: '',
-    desencadenantes: '',
-    tiempo: '',
-    restricciones: '',
-    entorno: '',
-    recompensa: '',
-    responsabilidad: '',
-    metrics: ['Libro abierto', '10 páginas leídas', 'Nota mental del aprendizaje'],
+  cocina: {
+    rows: [
+      { key: 'ready',     label: 'Cocina lista', sub: 'bacha + mesada' },
+      { key: 'breakfast', label: 'Desayuno preparado', sub: 'taza / base / zona lista' },
+      { key: 'under10',   label: 'Cierre en 10 min o menos', sub: 'simple, corto, real' },
+    ],
   },
 };
 
-const SYSTEM_PROMPT = `# ROL
-Actúa como mi coach de "Atomic Habits" y diseñador de sistemas de comportamiento. Eres experto en hábitos basados en identidad, diseño del entorno, reducción de fricción, consistencia diaria y cambio conductual sostenible.
+// ─────────────────────────────────────────────
+// DATE UTILITIES
+// ─────────────────────────────────────────────
 
-# MISIÓN
-Tu trabajo es ayudarme a construir un hábito o romper uno diseñando un sistema repetible, realista y de baja fricción usando:
-- hábitos basados en la identidad;
-- las Cuatro Leyes del Cambio de Comportamiento:
-  1. Hazlo Obvio
-  2. Hazlo Atractivo
-  3. Hazlo Fácil
-  4. Hazlo Satisfactorio
+function getMonday(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
-Prioriza: pequeñas mejoras; claridad conductual; diseño del entorno; ejecución en días de baja energía; consistencia por encima de intensidad; sistemas simples por encima de planes perfectos.
+function formatDay(date) {
+  return new Intl.DateTimeFormat('es-AR', { weekday: 'short', day: '2-digit' }).format(date);
+}
 
-Evita: consejos vagos; motivación vacía; sistemas demasiado ambiciosos; rutinas que dependan de fuerza de voluntad alta; hábitos "ideales" que no encajen con el contexto real.
+function formatDateRange(start) {
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const fmt = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short' });
+  return `Semana ${fmt.format(start)} – ${fmt.format(end)}`;
+}
 
-# REGLAS DE DECISIÓN
-1. Si falta información crítica haz supuestos conservadores y continúa.
-2. Si el hábito es "romper uno", aplica las leyes inversas: Invisible, Poco Atractivo, Difícil, Insatisfactorio.
-3. Diseña el sistema para que funcione también en "días malos".
-4. Si el hábito es demasiado grande, redúcelo antes de escalar.
-5. Prioriza siempre el cambio de mayor apalancamiento con menor fricción.
+function weekKey() {
+  const monday = getMonday();
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
-# INSTRUCCIÓN CRÍTICA DE FORMATO
-Responde ÚNICAMENTE con un objeto JSON válido. Sin texto antes ni después. Sin markdown. Sin bloques de código. Solo el JSON puro.
+function storageKey() {
+  return `habit-tracker-v2-${weekKey()}`;
+}
 
-El JSON debe seguir exactamente esta estructura:
+// ─────────────────────────────────────────────
+// STATE PERSISTENCE
+// ─────────────────────────────────────────────
 
-{
-  "identityPlan": {
-    "statement": "string",
-    "votes": ["string", "string", "string"],
-    "dailyEvidence": "string"
-  },
-  "onePercent": {
-    "minimumViable": "string",
-    "twoMinuteStarter": "string",
-    "growthPlan": ["string", "string", "string", "string"]
-  },
-  "fourLaws": [
-    {
-      "law": "string",
-      "action": "string",
-      "environmentChange": "string",
-      "script": "string",
-      "badDayPlan": "string"
-    }
-  ],
-  "habitStacking": ["string", "string", "string", "string", "string"],
-  "frictionEngineering": {
-    "reduce": ["string", "string", "string", "string", "string"],
-    "add": ["string", "string", "string", "string", "string"]
-  },
-  "makeAttractive": {
-    "temptationBundling": "string",
-    "socialGravity": "string",
-    "identityReinforcement": "string"
-  },
-  "makeSatisfying": {
-    "immediateReward": "string",
-    "trackingPlan": "string",
-    "celebrationScript": "string"
-  },
-  "failsafe": {
-    "ifThen": ["string", "string", "string"],
-    "neverTwiceRule": "string",
-    "resetRitual": "string"
-  },
-  "weeklyReview": {
-    "metrics": ["string", "string", "string"],
-    "adjustmentQuestions": ["string", "string", "string"],
-    "nextWeekChange": "string"
+function loadState() {
+  try {
+    return JSON.parse(localStorage.getItem(storageKey())) || {};
+  } catch {
+    return {};
   }
-}`;
-
-// No longer using internal COLORS object as we use Tailwind classes and CSS variables in index.css
-
-
-// ============================================================
-// UTILITIES
-// ============================================================
-
-function getISOWeekNumber(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
 }
 
-function getWeekKey(date = new Date()) {
-  const week = getISOWeekNumber(date);
-  const year = date.getFullYear();
-  if (date.getMonth() === 11 && week === 1) return `${year + 1}-01`;
-  if (date.getMonth() === 0 && week > 50) return `${year - 1}-${String(week).padStart(2, '0')}`;
-  return `${year}-${String(week).padStart(2, '0')}`;
+function saveState(state) {
+  localStorage.setItem(storageKey(), JSON.stringify(state));
 }
 
-function getDateKey(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function ensureStateShape(state) {
+  const result = { ...state };
+  for (const habit of Object.keys(TRACKER_CONFIG)) {
+    if (!result[habit]) result[habit] = {};
+    TRACKER_CONFIG[habit].rows.forEach(row => {
+      if (!result[habit][row.key]) result[habit][row.key] = Array(7).fill(false);
+    });
+  }
+  return result;
 }
 
-function getDayIndex(date = new Date()) {
-  return (date.getDay() + 6) % 7; // 0=Mon, 6=Sun
+// ─────────────────────────────────────────────
+// PROGRESS CARD
+// ─────────────────────────────────────────────
+
+function ProgressCard({ title, done, total }) {
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+  return (
+    <div className="progress-card">
+      <div className="progress-top">
+        <div className="title">{title}</div>
+        <div className="val">{done}/{total} · {pct}%</div>
+      </div>
+      <div className="progress-bar">
+        <div className="progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
-function getWeekDatesFromKey(weekKey) {
-  const [yearStr, weekStr] = weekKey.split('-');
-  const year = parseInt(yearStr, 10);
-  const week = parseInt(weekStr, 10);
-  const jan4 = new Date(year, 0, 4);
-  const jan4Day = (jan4.getDay() + 6) % 7;
-  const monday = new Date(jan4);
-  monday.setDate(jan4.getDate() - jan4Day + (week - 1) * 7);
-  monday.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, i) => {
+// ─────────────────────────────────────────────
+// WEEKLY TRACKER
+// ─────────────────────────────────────────────
+
+function WeeklyTracker({ habitKey, checks, onCheck }) {
+  const monday = getMonday();
+  const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     return d;
   });
-}
 
-function loadLS(key, def) {
-  try {
-    const v = localStorage.getItem(key);
-    return v === null ? def : JSON.parse(v);
-  } catch { return def; }
-}
+  const cfg = TRACKER_CONFIG[habitKey];
+  const state = ensureStateShape(checks);
 
-function saveLS(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-}
-
-function calcStreak(habitId, habits, checks) {
-  const habit = habits.find(h => h.id === habitId);
-  if (!habit || habit.metrics.length === 0) return 0;
-  const total = habit.metrics.length;
-  let streak = 0;
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - 1); // start from yesterday
-  for (let i = 0; i < 365; i++) {
-    const wk = getWeekKey(d);
-    const di = getDayIndex(d);
-    const dayChecks = checks[wk]?.[habitId]?.[di] || {};
-    const count = Object.values(dayChecks).filter(Boolean).length;
-    if (count >= total) {
-      streak++;
-      d.setDate(d.getDate() - 1);
-    } else break;
-  }
-  return streak;
-}
-
-function calcMonthlyStats(habitId, habits, checks, notes) {
-  const habit = habits.find(h => h.id === habitId);
-  if (!habit) return { completeDays: 0, pct: 0, streak: 0, bestStreak: 0, notesCount: 0 };
-  const total = habit.metrics.length;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const daysPassed = today.getDate();
-
-  let completeDays = 0, tempStreak = 0, bestStreak = 0, notesCount = 0;
-  for (let d = 1; d <= daysPassed; d++) {
-    const date = new Date(year, month, d);
-    const wk = getWeekKey(date);
-    const di = getDayIndex(date);
-    const dayChecks = checks[wk]?.[habitId]?.[di] || {};
-    const count = Object.values(dayChecks).filter(Boolean).length;
-    const complete = total > 0 && count >= total;
-    if (complete) { completeDays++; tempStreak++; bestStreak = Math.max(bestStreak, tempStreak); }
-    else tempStreak = 0;
-    const dk = getDateKey(date);
-    if (notes[dk]?.[habitId]) notesCount++;
-  }
-  // current streak
-  let streak = 0;
-  const sd = new Date(today);
-  sd.setDate(sd.getDate() - 1);
-  for (let i = 0; i < daysPassed; i++) {
-    if (sd.getMonth() !== month) break;
-    const wk = getWeekKey(sd);
-    const di = getDayIndex(sd);
-    const dayChecks = checks[wk]?.[habitId]?.[di] || {};
-    const count = Object.values(dayChecks).filter(Boolean).length;
-    if (total > 0 && count >= total) { streak++; sd.setDate(sd.getDate() - 1); }
-    else break;
-  }
-  const pct = daysPassed > 0 ? Math.round((completeDays / daysPassed) * 100) : 0;
-  return { completeDays, pct, streak, bestStreak, notesCount };
-}
-
-// ============================================================
-// MODAL
-// ============================================================
-
-function Modal({ title, message, confirmLabel, onConfirm, onCancel, danger }) {
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1000] p-4">
-      <div className="glass-card max-w-md w-full p-8 animate-in fade-in zoom-in duration-200">
-        <h3 className="text-xl font-bold mb-2">{title}</h3>
-        <p className="text-brand-muted text-sm leading-relaxed mb-8">{message}</p>
-        <div className="flex gap-3 justify-end">
-          <button 
-            onClick={onCancel} 
-            className="px-6 py-2.5 rounded-full border border-white/10 hover:bg-white/5 transition-colors text-sm font-medium"
-          >
-            Cancelar
-          </button>
-          <button 
-            onClick={onConfirm} 
-            className={`px-6 py-2.5 rounded-full text-sm font-bold transition-all ${
-              danger ? 'bg-red-500 hover:bg-red-600 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]' : 'bg-white text-brand-bg hover:bg-brand-primary'
-            }`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Sparkline({ data }) {
-  return (
-    <div className="flex items-end gap-1 h-8">
-      {data.map((active, i) => (
-        <div 
-          key={i} 
-          className={`w-1.5 rounded-full transition-all duration-300 ${
-            active 
-              ? 'h-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]' 
-              : 'h-[40%] bg-white/20'
-          }`}
-        />
-      ))}
-    </div>
-  );
-}
-
-function StatCard({ label, value, icon, colorClass, trend }) {
-  return (
-    <div className="glass-card p-6 relative overflow-hidden group">
-      <div className="relative z-10">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-1">{label}</span>
-        <div className="text-6xl font-bold tracking-tight mb-2">{value}</div>
-        {trend && <div className="text-xs font-medium text-emerald-400 flex items-center gap-1">
-          <span className="material-symbols-outlined text-sm">trending_up</span> {trend}
-        </div>}
-      </div>
-      <div className={`absolute top-6 right-6 w-12 h-12 rounded-2xl liquid-glass flex items-center justify-center group-hover:scale-110 transition-transform duration-300 ${colorClass}`}>
-        <span className="material-symbols-outlined text-2xl">{icon}</span>
-      </div>
-    </div>
-  );
-}
-
-
-// ============================================================
-// PROGRESS BAR
-// ============================================================
-
-function ProgressBar({ value, label, showLabel = true }) {
-  const pct = Math.min(100, Math.max(0, Math.round(value * 100)));
-  return (
-    <div className="w-full">
-      {showLabel && (
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-brand-muted">{label}</span>
-          <span className="text-xs font-bold">{pct}%</span>
-        </div>
-      )}
-      <div className="progress-track">
-        <div 
-          className="progress-fill" 
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-
-// ============================================================
-// HEADER
-// ============================================================
-
-function Header({ theme, setTheme, activeTab, setActiveTab, onResetWeek, onExportPDF }) {
-  return (
-    <header className="fixed top-0 left-0 right-0 z-50 p-6 no-print pointer-events-none">
-      <div className="max-w-7xl mx-auto flex items-center justify-between pointer-events-auto">
-        {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-sky-400 flex items-center justify-center shadow-lg shadow-violet-500/20">
-            <span className="material-symbols-outlined text-white font-bold">bolt</span>
-          </div>
-          <span className="text-xl font-black tracking-tighter text-white hidden md:block">ATOMIC</span>
-        </div>
-
-        {/* Central Nav Pill */}
-        <nav className="nav-pill px-2 py-1.5 flex gap-1 items-center">
-          {['Dashboard', 'Sistemas', 'Nuevo'].map((tab, i) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(i)}
-              className={`px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${
-                activeTab === i 
-                  ? 'bg-white/10 text-white shadow-lg backdrop-blur-md border border-white/20' 
-                  : 'text-brand-muted hover:text-white hover:bg-white/5'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </nav>
-
-        {/* Right Actions */}
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            className="w-10 h-10 rounded-full nav-pill flex items-center justify-center hover:bg-white/10 transition-colors"
-          >
-            <span className="material-symbols-outlined text-xl">
-              {theme === 'dark' ? 'light_mode' : 'dark_mode'}
-            </span>
-          </button>
-          <button 
-            onClick={onResetWeek}
-            className="w-10 h-10 rounded-full nav-pill flex items-center justify-center hover:bg-white/10 transition-colors"
-            title="Reiniciar semana"
-          >
-            <span className="material-symbols-outlined text-xl text-amber-400">restart_alt</span>
-          </button>
-          <button 
-            onClick={onExportPDF}
-            className="px-5 py-2 rounded-full bg-white text-brand-bg text-xs font-bold uppercase tracking-widest hover:scale-105 transition-transform"
-          >
-            Exportar
-          </button>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-
-// ============================================================
-// TAB NAV
-// ============================================================
-
-// TabNav is now integrated into the Header
-
-
-// ============================================================
-// HABIT CARD
-// ============================================================
-
-function HabitCard({ habit, checks, notes, weekDates, currentWeekKey, todayKey, c, onToggleCheck, onUpdateNote, onDelete }) {
-  const [expanded, setExpanded] = useState(false);
-  const streak = calcStreak(habit.id, [habit], checks);
-  const todayNote = notes[todayKey]?.[habit.id] || '';
-  const weekChecks = checks[currentWeekKey]?.[habit.id] || {};
-
-  // Sparkline data: check if all metrics were done for each day of the current week
-  const sparklineData = weekDates.map((_, di) => {
-    const dayChecks = weekChecks[di] || {};
-    const count = Object.values(dayChecks).filter(Boolean).length;
-    return habit.metrics.length > 0 && count >= habit.metrics.length;
+  const rows = cfg.rows;
+  let doneTotal = 0;
+  rows.forEach(row => {
+    (state[habitKey][row.key] || []).forEach(v => { if (v) doneTotal++; });
   });
 
-  // Calculate progress
-  const totalPossibleChecks = habit.metrics.length * 7;
-  const actualChecks = habit.metrics.reduce((acc, _, mi) => 
-    acc + weekDates.filter((_, di) => weekChecks[di]?.[mi]).length, 0);
-  const weeklyProgress = totalPossibleChecks > 0 ? actualChecks / totalPossibleChecks : 0;
+  const rowCounts = {};
+  rows.forEach(row => {
+    rowCounts[row.key] = (state[habitKey][row.key] || []).filter(Boolean).length;
+  });
 
-  // Monthly progress (simplified for card)
-  const monthlyStats = calcMonthlyStats(habit.id, [habit], checks, notes);
+  const progressCards = habitKey === 'madrugar'
+    ? [
+        { title: 'Progreso total de la semana', done: doneTotal, total: rows.length * 7 },
+        { title: 'Celular afuera a horario', done: rowCounts.phone || 0, total: 7 },
+        { title: 'De pie con la primera alarma', done: rowCounts.up || 0, total: 7 },
+      ]
+    : [
+        { title: 'Progreso total de la semana', done: doneTotal, total: rows.length * 7 },
+        { title: 'Cocina lista', done: rowCounts.ready || 0, total: 7 },
+        { title: 'Desayuno preparado', done: rowCounts.breakfast || 0, total: 7 },
+      ];
 
-  const headerGradients = {
-    'habit-madrugar': 'from-[#7c3aed]/80 to-[#a78bfa]/40', // Violet reference
-    'habit-cocina': 'from-[#059669]/80 to-[#34d399]/40',   // Emerald/Green reference
-    'default': 'from-[#f59e0b]/80 to-[#fbbf24]/40'        // Amber reference for new habits
-  };
-
-  const gradientClass = headerGradients[habit.id] || headerGradients['default'];
+  const tipText = habitKey === 'madrugar'
+    ? 'Meta mínima: celular afuera + de pie con la primera alarma'
+    : 'Zona mínima: bacha + mesada + desayuno';
 
   return (
-    <div className="glass-card overflow-hidden mb-6 flex flex-col group transition-all duration-300 hover:translate-y-[-2px] hover:shadow-2xl">
-      {/* Card Header */}
-      <div className={`p-6 bg-gradient-to-r ${gradientClass} flex justify-between items-start`}>
-        <div>
-          <h3 className="text-3xl font-extrabold tracking-tight text-white mb-1 uppercase">{habit.name}</h3>
-          <p className="text-white/70 text-xs font-medium max-w-[240px] leading-tight">{habit.description}</p>
-        </div>
-        <div className="flex flex-col items-end gap-3">
-          <Sparkline data={sparklineData} />
-          <div className="flex gap-2">
-            {!habit.isDefault && (
-              <button 
-                onClick={() => onDelete(habit.id)}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
-              >
-                <span className="material-symbols-outlined text-sm">delete</span>
-              </button>
-            )}
-          </div>
-        </div>
+    <>
+      <div className="status-row">
+        <span className="status-chip">{formatDateRange(monday)}</span>
+        <span className="status-chip">{tipText}</span>
       </div>
 
-      {/* Grid of Days & Metrics */}
-      <div className="p-6">
-        <div className="overflow-x-auto">
-          <table className="w-full border-separate border-spacing-y-3">
+      {/* Header row */}
+      <div className="tracker-grid">
+        <div className="tracker-head">
+          <strong>Acción</strong>
+          Semana actual
+        </div>
+        {days.map((date, i) => (
+          <div key={i} className="tracker-head">
+            <strong>{formatDay(date).replace('.', '')}</strong>
+            {String(date.getDate()).padStart(2, '0')}
+          </div>
+        ))}
+      </div>
+
+      {/* Data rows */}
+      {cfg.rows.map(row => (
+        <div key={row.key} className="tracker-row tracker-grid">
+          <div className="tracker-label">
+            {row.label}
+            <span>{row.sub}</span>
+          </div>
+          {Array.from({ length: 7 }, (_, i) => (
+            <div key={i} className="tracker-cell">
+              <input
+                type="checkbox"
+                checked={Boolean(state[habitKey]?.[row.key]?.[i])}
+                onChange={e => onCheck(habitKey, row.key, i, e.target.checked)}
+                aria-label={`${row.label} día ${i + 1}`}
+              />
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Progress bars */}
+      <div className="progress-wrap">
+        {progressCards.map((pc, i) => (
+          <ProgressCard key={i} title={pc.title} done={pc.done} total={pc.total} />
+        ))}
+      </div>
+
+      <p className="print-tip">
+        Para el PDF: tocá <strong>Exportar PDF</strong> y en la ventana del navegador elegí <strong>Guardar como PDF</strong>.
+      </p>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MADRUGAR SECTION
+// ─────────────────────────────────────────────
+
+function MadrugarSection({ checks, onCheck }) {
+  return (
+    <section id="madrugar" className="habit">
+      <div className="habit-head">
+        <div className="habit-title">
+          <h2>Levantarme temprano y dormir temprano</h2>
+          <span className="badge">Hábito de energía</span>
+          <span className="badge">Meta: 6:00 AM</span>
+        </div>
+        <p className="muted">
+          Sistema para proteger la noche, simplificar el cierre del día y ganar la mañana sin depender de fuerza de voluntad.
+        </p>
+      </div>
+
+      <div className="grid">
+
+        {/* Tracker */}
+        <article className="card cols-12">
+          <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
+          <p className="muted">Tildá sólo lo que realmente hiciste. El progreso se actualiza solo y queda guardado en este navegador.</p>
+          <WeeklyTracker habitKey="madrugar" checks={checks} onCheck={onCheck} />
+        </article>
+
+        {/* Plan de identidad */}
+        <article className="card cols-6">
+          <h3><span className="icon">A</span>Plan de identidad</h3>
+          <p><strong>Declaración:</strong> Soy un madrugador que protege la noche para ganar la mañana.</p>
+          <ul>
+            <li>Dejo el celular cargando fuera del cuarto a las 22:30.</li>
+            <li>Cierro la compu y anoto el próximo paso del proyecto antes de las 22:35.</li>
+            <li>Me pongo de pie dentro del primer minuto de la alarma y voy directo a la cocina.</li>
+          </ul>
+          <div className="quote">Hoy voté por ser madrugador cuando ______ a las ______.</div>
+        </article>
+
+        {/* Sistema del 1% */}
+        <article className="card cols-6">
+          <h3><span className="icon">B</span>Sistema del 1%</h3>
+          <p><strong>Versión mínima:</strong> a las 22:30 dejo el celular fuera del cuarto y a las 6:00 me pongo de pie y camino hasta la cocina.</p>
+          <p><strong>Regla de los dos minutos:</strong> cuando marque 22:30, cierro la compu, dejo el celular lejos de la cama y preparo agua/ropa para la mañana en menos de 2 minutos.</p>
+          <div className="pill-list">
+            <span className="pill">Celular afuera</span>
+            <span className="pill">Compu cerrada</span>
+            <span className="pill">Agua lista</span>
+            <span className="pill">Ropa lista</span>
+            <span className="pill">Cocina directo</span>
+          </div>
+        </article>
+
+        {/* Plan de aumento */}
+        <article className="card cols-12">
+          <h3><span className="icon">📈</span>Plan de aumento — 4 semanas</h3>
+          <div className="timeline">
+            <div className="step"><b>Semana 1</b>Celular afuera 22:45<br />Cama 23:30<br />Alarma 6:50</div>
+            <div className="step"><b>Semana 2</b>Celular afuera 22:30<br />Cama 23:15<br />Alarma 6:30</div>
+            <div className="step"><b>Semana 3</b>Celular afuera 22:15<br />Cama 23:00<br />Alarma 6:15</div>
+            <div className="step"><b>Semana 4</b>Celular afuera 22:00<br />Cama 22:45<br />Alarma 6:00</div>
+          </div>
+          <div className="footer-note small">
+            Regla fija: no se negocia el horario de "celular afuera". Sólo se ajusta 15 minutos por semana.
+          </div>
+        </article>
+
+        {/* Cuatro Leyes */}
+        <article className="card cols-12">
+          <h3><span className="icon">C</span>Diseño de las Cuatro Leyes</h3>
+          <table>
             <thead>
               <tr>
-                <th className="text-left text-[10px] font-bold uppercase tracking-widest text-brand-muted pb-2">Métrica</th>
-                {weekDates.map((d, di) => (
-                  <th key={di} className={`pb-2 text-center`}>
-                    <div className={`text-[10px] font-bold uppercase tracking-widest ${getDateKey(d) === todayKey ? 'text-white scale-110' : 'text-brand-muted'}`}>
-                      {DAYS[di]}
-                    </div>
-                  </th>
-                ))}
+                <th>Ley</th>
+                <th>Qué haré</th>
+                <th>Cambio de entorno</th>
+                <th>Guion</th>
+                <th>Plan B</th>
               </tr>
             </thead>
             <tbody>
-              {habit.metrics.map((metric, mi) => (
-                <tr key={mi}>
-                  <td className="text-sm font-medium text-brand-primary pr-4 py-1 whitespace-nowrap overflow-hidden text-ellipsis max-w-[140px]">
-                    {metric}
-                  </td>
-                  {weekDates.map((d, di) => {
-                    const checked = !!weekChecks[di]?.[mi];
-                    const isToday = getDateKey(d) === todayKey;
-                    const isFuture = d > new Date();
-                    return (
-                      <td key={di} className="text-center px-1">
-                        <div 
-                          onClick={() => !isFuture && onToggleCheck(habit.id, di, mi)}
-                          className={`mx-auto checkbox-custom ${checked ? 'checked' : ''} ${isToday ? ' ring-1 ring-white/30 scale-105' : ''} ${isFuture ? 'opacity-20 cursor-default' : 'hover:scale-110 active:scale-95'}`}
-                        >
-                          {checked && <span className="material-symbols-outlined text-sm font-bold text-white">check</span>}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Obvio</strong></td>
+                <td data-label="Qué haré">Activaré una alarma de cierre a las 22:30 y otra para levantarme a las 6:00.</td>
+                <td data-label="Cambio de entorno">Cargador fuera del cuarto, vaso de agua listo, ropa lista, persiana apenas abierta.</td>
+                <td data-label="Guion">"No estoy cortando la noche; estoy preparando mi mañana."</td>
+                <td data-label="Plan B">Si estoy pasado de hora, igual dejo el celular afuera y me acuesto sin intentar "aprovechar 20 minutos más".</td>
+              </tr>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Atractivo</strong></td>
+                <td data-label="Qué haré">Reservaré el mejor desayuno y la mejor calma sólo para la mañana temprana.</td>
+                <td data-label="Cambio de entorno">Desayuno premium visible y listo desde la noche anterior.</td>
+                <td data-label="Guion">"A las 6:00 me espera mi mejor momento del día."</td>
+                <td data-label="Plan B">Si estoy cansado, sólo hago agua + desayuno simple + 10 minutos de calma.</td>
+              </tr>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Fácil</strong></td>
+                <td data-label="Qué haré">Reduciré la rutina nocturna a 3 pasos: cerrar compu, cargar celular afuera, preparar mañana.</td>
+                <td data-label="Cambio de entorno">Nada de decisiones a la noche; todo listo antes.</td>
+                <td data-label="Guion">"Mi trabajo es empezar, no hacerlo perfecto."</td>
+                <td data-label="Plan B">Si llego destruido, hago sólo esos 3 pasos y me voy a dormir.</td>
+              </tr>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Satisfactorio</strong></td>
+                <td data-label="Qué haré">Marcaré una X apenas cumpla el combo noche + mañana.</td>
+                <td data-label="Cambio de entorno">Hoja visible o nota en el celu con 2 casillas.</td>
+                <td data-label="Guion">"Ya gané la mañana."</td>
+                <td data-label="Plan B">Si no salió perfecto, marco medio punto por cumplir la versión mínima.</td>
+              </tr>
             </tbody>
           </table>
-        </div>
+        </article>
 
-        {/* Progress Bars Section */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <ProgressBar value={weeklyProgress} label="Progreso Semanal" />
-          <ProgressBar value={monthlyStats.pct / 100} label="Progreso Mensual" />
-        </div>
-      </div>
+        {/* Guiones de acumulación */}
+        <article className="card cols-6">
+          <h3><span className="icon">D</span>Guiones de acumulación</h3>
+          <ul className="check">
+            <li>Después de cerrar la computadora, dejaré cargando el celular fuera del cuarto a las 22:30 en la cocina.</li>
+            <li>Después de lavarme los dientes, me meteré en la cama sin volver a tocar pantallas a las 22:40 en mi cuarto.</li>
+            <li>Después de apagar la luz del escritorio, prepararé el vaso de agua y la ropa del día siguiente a las 22:35.</li>
+            <li>Después de apagar la alarma, me pondré de pie y caminaré a la cocina a las 6:00.</li>
+            <li>Después de servirme el desayuno, abriré la ventana y me quedaré 5 minutos en calma a las 6:05.</li>
+          </ul>
+        </article>
 
-      {/* Footer Actions & Streak */}
-      <div className="mt-auto px-6 py-4 border-t border-white/5 flex items-center justify-between bg-white/2">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setExpanded(!expanded)}
-            className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-brand-muted hover:text-white transition-colors"
-          >
-            <span className="material-symbols-outlined text-sm">notes</span>
-            Session Notes
-          </button>
-          {streak > 0 && (
-            <div className="px-3 py-1 rounded-full liquid-glass flex items-center gap-1 text-[10px] font-bold text-white tracking-widest uppercase">
-              <span className="material-symbols-outlined text-sm text-amber-400">local_fire_department</span>
-              {streak} Day Streak
+        {/* Ingeniería de fricción */}
+        <article className="card cols-6">
+          <h3><span className="icon">E</span>Ingeniería de fricción</h3>
+          <p><strong>Eliminar fricción:</strong></p>
+          <ul>
+            <li>Un único cargador nocturno en la cocina o lejos de la cama.</li>
+            <li>Compu cerrada y guardada a las 22:30.</li>
+            <li>Desayuno base preparado la noche anterior.</li>
+            <li>Modo "No molestar" automático de 22:15 a 6:30.</li>
+            <li>Hoja visible con dos casillas: "celular afuera" y "de pie 6:00".</li>
+          </ul>
+          <p><strong>Agregar fricción al mal hábito:</strong></p>
+          <ul>
+            <li>Sacar el cargador del dormitorio.</li>
+            <li>Bloquear apps tentadoras desde las 22:15.</li>
+            <li>Nota arriba de la compu: "Anotá el próximo paso y cerrá".</li>
+            <li>Cama = dormir, no scrollear.</li>
+            <li>Si agarrás el celular de noche, lo devolvés lejos y hacés 3 respiraciones.</li>
+          </ul>
+        </article>
+
+        {/* Hazlo atractivo */}
+        <article className="card cols-6">
+          <h3><span className="icon">F</span>Hazlo atractivo</h3>
+          <ul>
+            <li><strong>Agrupación de tentaciones:</strong> el mejor desayuno, la música tranquila, el silencio y el contenido que disfrutes van sólo con el combo "celular afuera + levantada 6:00".</li>
+            <li><strong>Gravedad social:</strong> check-in silencioso con un amigo, grupo o foto del desayuno antes de las 6:15.</li>
+            <li><strong>Refuerzo de identidad:</strong> no "estoy intentando madrugar"; sino "yo cuido la noche porque soy de mañana".</li>
+          </ul>
+        </article>
+
+        {/* Hazlo satisfactorio */}
+        <article className="card cols-6">
+          <h3><span className="icon">G</span>Hazlo satisfactorio</h3>
+          <ul>
+            <li><strong>Recompensa inmediata:</strong> desayuno rico + 10 minutos de paz total sin interrupciones.</li>
+            <li><strong>Seguimiento:</strong> dos casillas por día: "celular afuera" y "de pie 6:00".</li>
+            <li><strong>Celebración:</strong> "Ya estoy arriba; el día arrancó a mi favor."</li>
+          </ul>
+        </article>
+
+        {/* A prueba de fallos */}
+        <article className="card cols-12">
+          <h3><span className="icon">H</span>A prueba de fallos</h3>
+          <div className="ifthen">
+            <div className="box"><strong>Si me engancho con el celular a la noche</strong>, entonces lo dejo a cargar fuera del cuarto en ese mismo segundo y cierro el día sin negociar.</div>
+            <div className="box"><strong>Si me engancho con proyectos en la compu</strong>, entonces anoto el próximo paso en una línea, cierro la tapa y sigo mañana.</div>
+            <div className="box"><strong>Si siento que alguien puede invadirme la mañana</strong>, entonces dejo lista una versión mínima de mi rincón de paz en la cocina y arranco igual aunque sea con 10 minutos.</div>
+          </div>
+          <div className="footer-note small">
+            <strong>Regla de no fallar dos veces:</strong> al día siguiente sólo exijo versión mínima obligatoria: celular afuera a horario y cuerpo fuera de la cama con la primera alarma.<br />
+            <strong>Ritual de reinicio (2 minutos):</strong> dejo el celular lejos, tomo agua, abro la ventana, respiro 3 veces y preparo la mañana de una.
+          </div>
+        </article>
+
+        {/* Revisión semanal */}
+        <article className="card cols-12">
+          <h3><span className="icon">I</span>Revisión semanal</h3>
+          <div className="metrics">
+            <div className="metric">
+              <div className="label">Indicador 1</div>
+              <div className="value">Noches con celular afuera a la hora objetivo</div>
             </div>
-          )}
-        </div>
-        <div className="text-[10px] font-bold uppercase tracking-widest text-brand-muted">
-          Updated {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </div>
+            <div className="metric">
+              <div className="label">Indicador 2</div>
+              <div className="value">Mañanas de pie dentro de 1 minuto de la alarma</div>
+            </div>
+            <div className="metric">
+              <div className="label">Indicador 3</div>
+              <div className="value">Noches en cama dentro del rango objetivo</div>
+            </div>
+          </div>
+          <ul>
+            <li>¿Qué me robó más tiempo a la noche esta semana?</li>
+            <li>¿Qué app o conducta rompió más el cierre?</li>
+            <li>¿Qué parte de la rutina nocturna puedo hacer todavía más corta?</li>
+          </ul>
+          <div className="quote">
+            Única modificación de la próxima semana: adelantar 15 minutos la hora de "celular afuera" y no tocar nada más.
+          </div>
+        </article>
+
       </div>
-
-      {expanded && (
-        <div className="px-6 py-4 bg-black/20 animate-in slide-in-from-top-4 duration-300">
-          <textarea
-            value={todayNote}
-            onChange={e => onUpdateNote(habit.id, todayKey, e.target.value)}
-            placeholder="Escribe tus notas de hoy aquí..."
-            className="w-full bg-transparent border-none text-sm text-brand-primary focus:ring-0 placeholder:text-brand-muted/30 min-h-[80px] resize-none"
-          />
-        </div>
-      )}
-    </div>
+    </section>
   );
 }
 
+// ─────────────────────────────────────────────
+// COCINA SECTION
+// ─────────────────────────────────────────────
 
-// ============================================================
-// MONTHLY STATS
-// ============================================================
-
-function MonthlyStats({ habits, checks, notes, open, onToggle }) {
-  const today = new Date();
-  const monthName = today.toLocaleString('es', { month: 'long', year: 'numeric' });
-
+function CocinaSection({ checks, onCheck }) {
   return (
-    <div className="glass-card overflow-hidden">
-      <button 
-        onClick={onToggle} 
-        className="w-full p-6 text-left flex justify-between items-center hover:bg-white/5 transition-colors"
-      >
-        <span className="text-[10px] font-bold uppercase tracking-widest text-brand-muted">
-          Detailed Report / {monthName}
-        </span>
-        <span className={`material-symbols-outlined transition-transform duration-300 ${open ? 'rotate-180' : ''}`}>
-          expand_more
-        </span>
-      </button>
-      
-      {open && (
-        <div className="p-6 border-t border-white/5 space-y-6 animate-in slide-in-from-top-4 duration-300">
-          {habits.map(habit => {
-            const stats = calcMonthlyStats(habit.id, [habit], checks, notes);
-            return (
-              <div key={habit.id} className="liquid-glass p-4 rounded-2xl flex flex-wrap gap-8 items-center">
-                <div className="min-w-[140px]">
-                  <div className="text-xs font-bold text-white uppercase tracking-tight">{habit.name}</div>
-                  <div className="text-[10px] text-brand-muted uppercase tracking-widest font-bold">Monthly Focus</div>
-                </div>
-                <div className="flex flex-wrap gap-8">
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-black">{stats.pct}%</span>
-                    <span className="text-[8px] font-bold uppercase tracking-widest text-brand-muted">Accuracy</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-black">{stats.streak}d</span>
-                    <span className="text-[8px] font-bold uppercase tracking-widest text-brand-muted">Current</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-black">{stats.bestStreak}d</span>
-                    <span className="text-[8px] font-bold uppercase tracking-widest text-brand-muted">Best</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+    <section id="cocina" className="habit">
+      <div className="habit-head kitchen">
+        <div className="habit-title">
+          <h2>Limpieza de cocina</h2>
+          <span className="badge">Hábito de orden</span>
+          <span className="badge">Meta: cocina lista</span>
         </div>
-      )}
-    </div>
-  );
-}
-
-
-// ============================================================
-// DASHBOARD TAB
-// ============================================================
-
-function DashboardTab({ habits, checks, notes, weekDates, currentWeekKey, todayKey, toggleCheck, updateNote, statsOpen, setStatsOpen, onDeleteHabit }) {
-  if (habits.length === 0) {
-    return (
-      <div className="text-center py-24 glass-card p-12">
-        <div className="text-6xl mb-6 grayscale group-hover:grayscale-0 transition-all">🌱</div>
-        <h3 className="text-2xl font-bold mb-2">No hay hábitos todavía</h3>
-        <p className="text-brand-muted text-sm max-w-sm mx-auto mb-8">
-          Comienza tu viaje hacia la identidad que deseas construyendo tu primer sistema.
+        <p className="muted">
+          Sistema corto, realista y sin volverte empleado de la casa: bacha, mesada y desayuno listo.
         </p>
       </div>
-    );
-  }
 
-  // Calculate global stats for the StatCards
-  const totalPossibleChecks = habits.reduce((acc, h) => acc + h.metrics.length * 7, 0);
-  const totalActualChecks = habits.reduce((acc, h) => {
-    const wc = checks[currentWeekKey]?.[h.id] || {};
-    return acc + h.metrics.reduce((ma, _, mi) => ma + weekDates.filter((_, di) => wc[di]?.[mi]).length, 0);
-  }, 0);
-  const globalWeeklyPct = totalPossibleChecks > 0 ? (totalActualChecks / totalPossibleChecks) * 100 : 0;
-  
-  const activeStreaks = habits.map(h => calcStreak(h.id, [h], checks));
-  const maxStreak = activeStreaks.length > 0 ? Math.max(...activeStreaks) : 0;
+      <div className="grid">
 
-  return (
-    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {/* 3-Column Stats Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard 
-          label="Weekly Completion" 
-          value={`${Math.round(globalWeeklyPct)}%`} 
-          icon="show_chart" 
-          colorClass="text-violet-400"
-          trend="+5%"
-        />
-        <StatCard 
-          label="Active Streaks" 
-          value={maxStreak} 
-          icon="local_fire_department" 
-          colorClass="text-amber-400"
-        />
-        <StatCard 
-          label="Habits Tracked" 
-          value={habits.length} 
-          icon="grid_view" 
-          colorClass="text-sky-400"
-        />
-      </section>
+        {/* Tracker */}
+        <article className="card cols-12">
+          <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
+          <p className="muted">Acá tenés el cierre de cocina convertido en acciones medibles. Lo ideal es no hacerlo perfecto; lo ideal es hacerlo.</p>
+          <WeeklyTracker habitKey="cocina" checks={checks} onCheck={onCheck} />
+        </article>
 
-      {/* Week Grid Navigator */}
-      <section className="flex justify-between items-center bg-white/5 p-4 rounded-[32px] border border-white/5 overflow-x-auto gap-4">
-        {weekDates.map((d, di) => {
-          const isToday = getDateKey(d) === todayKey;
-          return (
-            <div 
-              key={di} 
-              className={`flex-1 min-w-[60px] p-3 rounded-full flex flex-col items-center justify-center transition-all duration-300 ${isToday ? 'bg-white text-brand-bg scale-105 shadow-xl shadow-white/10' : 'hover:bg-white/5 text-brand-muted hover:translate-y-[-2px]'}`}
-            >
-              <span className="text-[10px] font-bold uppercase tracking-widest">{DAYS[di]}</span>
-              <span className="text-lg font-black">{d.getDate()}</span>
+        {/* Plan de identidad */}
+        <article className="card cols-6">
+          <h3><span className="icon">A</span>Plan de identidad</h3>
+          <p><strong>Declaración:</strong> Soy un hombre que deja la cocina lista para su mejor mañana.</p>
+          <ul>
+            <li>Lavo lo que usé antes de salir de la cocina.</li>
+            <li>Dejo la bacha y la mesada despejadas antes de dormir.</li>
+            <li>Preparo la zona del desayuno para la mañana siguiente.</li>
+          </ul>
+          <div className="quote">Hoy voté por el orden cuando dejé ______ limpio antes de dormir.</div>
+        </article>
+
+        {/* Sistema del 1% */}
+        <article className="card cols-6">
+          <h3><span className="icon">B</span>Sistema del 1%</h3>
+          <p><strong>Versión mínima:</strong> lavo lo que usé, despejo la mesada principal y dejo lista la zona del desayuno en 3 minutos.</p>
+          <p><strong>Regla de los dos minutos:</strong> cuando termine el último uso de la cocina a la noche, lavo mi plato/vaso/taza y paso un trapo rápido por la mesada durante 2 minutos.</p>
+          <div className="pill-list">
+            <span className="pill">Lo mío lavado</span>
+            <span className="pill">Bacha despejada</span>
+            <span className="pill">Mesada lista</span>
+            <span className="pill">Desayuno preparado</span>
+          </div>
+        </article>
+
+        {/* Plan de aumento */}
+        <article className="card cols-12">
+          <h3><span className="icon">📈</span>Plan de aumento — 4 semanas</h3>
+          <div className="timeline">
+            <div className="step"><b>Semana 1</b>Sólo lo mío + mesada principal en 3 minutos.</div>
+            <div className="step"><b>Semana 2</b>Lo mío + bacha vacía + mesada en 5 minutos.</div>
+            <div className="step"><b>Semana 3</b>Lo anterior + dejar desayuno listo en 7 minutos.</div>
+            <div className="step"><b>Semana 4</b>Lo anterior + máximo 10 minutos para ordenar lo común si hay caos.</div>
+          </div>
+          <div className="footer-note small">
+            Regla fija: no te convertís en empleado de la casa; tu zona no negociable es bacha, mesada y desayuno.
+          </div>
+        </article>
+
+        {/* Cuatro Leyes */}
+        <article className="card cols-12">
+          <h3><span className="icon">C</span>Diseño de las Cuatro Leyes</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Ley</th>
+                <th>Qué haré</th>
+                <th>Cambio de entorno</th>
+                <th>Guion</th>
+                <th>Plan B</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Obvio</strong></td>
+                <td data-label="Qué haré">Haré un "cierre de cocina" antes de dormir.</td>
+                <td data-label="Cambio de entorno">Esponja, detergente, trapo y secaplatos listos y visibles.</td>
+                <td data-label="Guion">"No estoy limpiando por todos; estoy cuidando mi mañana."</td>
+                <td data-label="Plan B">Si llego muerto, lavo sólo lo mío, despejo una mesada y dejo el desayuno listo.</td>
+              </tr>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Atractivo</strong></td>
+                <td data-label="Qué haré">Lo uniré con música o audio que me guste sólo durante el cierre.</td>
+                <td data-label="Cambio de entorno">Playlist de 10 minutos reservada para ese momento.</td>
+                <td data-label="Guion">"En 10 minutos me compro paz para mañana."</td>
+                <td data-label="Plan B">Si no tengo ganas, pongo un timer de 2 minutos y empiezo por una sola cosa.</td>
+              </tr>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Fácil</strong></td>
+                <td data-label="Qué haré">Reduciré el cierre a una zona mínima no negociable.</td>
+                <td data-label="Cambio de entorno">Defino una sola zona crítica: bacha + mesada + desayuno.</td>
+                <td data-label="Guion">"No necesito dejar todo perfecto; necesito dejarlo listo."</td>
+                <td data-label="Plan B">Si la cocina está explotada, apilo lo ajeno prolijo a un costado y limpio sólo mi zona.</td>
+              </tr>
+              <tr>
+                <td data-label="Ley"><strong>Hazlo Satisfactorio</strong></td>
+                <td data-label="Qué haré">Haré visible el antes y después.</td>
+                <td data-label="Cambio de entorno">Foto rápida o check simple de "cocina lista".</td>
+                <td data-label="Guion">"Mañana me lo voy a agradecer."</td>
+                <td data-label="Plan B">Si quedó a medias, marco medio punto por haber dejado la zona crítica resuelta.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        {/* Guiones de acumulación */}
+        <article className="card cols-6">
+          <h3><span className="icon">D</span>Guiones de acumulación</h3>
+          <ul className="check">
+            <li>Después de terminar de cenar, lavaré lo que usé a las 21:30 en la cocina.</li>
+            <li>Después de servirme un vaso de agua a la noche, despejaré la mesada principal a las 22:00.</li>
+            <li>Después de apagar la computadora, haré el cierre de cocina a las 22:20.</li>
+            <li>Después de guardar la comida, dejaré lista la taza y el desayuno de mañana a las 22:25.</li>
+            <li>Después de lavarme los dientes, revisaré que la bacha quede vacía a las 22:35.</li>
+          </ul>
+        </article>
+
+        {/* Ingeniería de fricción */}
+        <article className="card cols-6">
+          <h3><span className="icon">E</span>Ingeniería de fricción</h3>
+          <p><strong>Eliminar fricción:</strong></p>
+          <ul>
+            <li>Esponja, detergente y trapo siempre en el mismo lugar y listos.</li>
+            <li>Secaplatos vacío antes de la noche.</li>
+            <li>Bandeja o rincón fijo para dejar armado el desayuno.</li>
+            <li>Timer de 5 o 10 minutos.</li>
+            <li>Zona mínima no negociable: bacha, mesada principal y desayuno listo.</li>
+          </ul>
+          <p><strong>Agregar fricción al mal hábito:</strong></p>
+          <ul>
+            <li>No irte con el plato/vaso en la mano; apoyado = pendiente.</li>
+            <li>No conectar el celular a cargar hasta hacer el cierre.</li>
+            <li>Cartel visible: "Cocina lista = mañana ganada".</li>
+            <li>Si hay caos ajeno, apilarlo prolijo a un costado.</li>
+            <li>No empezar algo nuevo en la compu sin hacer la versión mínima de 3 minutos.</li>
+          </ul>
+        </article>
+
+        {/* Hazlo atractivo */}
+        <article className="card cols-6">
+          <h3><span className="icon">F</span>Hazlo atractivo</h3>
+          <ul>
+            <li><strong>Agrupación de tentaciones:</strong> playlist, audio o mini recompensa sólo durante el cierre de cocina.</li>
+            <li><strong>Gravedad social:</strong> tu referencia es la gente ordenada que se prepara el terreno antes de dormir.</li>
+            <li><strong>Refuerzo de identidad:</strong> no es "me tocó limpiar"; es "yo dejo el escenario listo porque soy un tipo ordenado".</li>
+          </ul>
+        </article>
+
+        {/* Hazlo satisfactorio */}
+        <article className="card cols-6">
+          <h3><span className="icon">G</span>Hazlo satisfactorio</h3>
+          <ul>
+            <li><strong>Recompensa inmediata:</strong> irte a dormir con la cocina visualmente limpia y el desayuno medio armado.</li>
+            <li><strong>Seguimiento:</strong> una sola casilla por noche: "cocina lista". Si además quedó desayuno preparado, agregás un "+".</li>
+            <li><strong>Celebración:</strong> "Listo, mañana entro y está todo a favor mío."</li>
+          </ul>
+        </article>
+
+        {/* A prueba de fallos */}
+        <article className="card cols-12">
+          <h3><span className="icon">H</span>A prueba de fallos</h3>
+          <div className="ifthen">
+            <div className="box"><strong>Si llego tarde y la cocina está detonada</strong>, entonces hago sólo la zona mínima no negociable durante 5 minutos.</div>
+            <div className="box"><strong>Si me da bronca sentir que siempre soy yo</strong>, entonces limpio sólo lo mío + bacha + mesada y apilo prolijo lo demás sin cargarme toda la casa.</div>
+            <div className="box"><strong>Si no tengo ganas</strong>, entonces pongo timer de 2 minutos y empiezo por el objeto más grande o más molesto.</div>
+          </div>
+          <div className="footer-note small">
+            <strong>Regla de no fallar dos veces:</strong> la noche siguiente hago sí o sí la versión mínima de 3 minutos, aunque no haga nada más.<br />
+            <strong>Ritual de reinicio (2 minutos):</strong> abrís agua caliente, agarrás esponja, limpiás un solo objeto grande, pasás trapo a una mesada y dejás la taza del desayuno lista.
+          </div>
+        </article>
+
+        {/* Revisión semanal */}
+        <article className="card cols-12">
+          <h3><span className="icon">I</span>Revisión semanal</h3>
+          <div className="metrics">
+            <div className="metric">
+              <div className="label">Indicador 1</div>
+              <div className="value">Noches con cocina lista</div>
             </div>
-          );
-        })}
-      </section>
-
-      {/* Habits List */}
-      <section className="space-y-8">
-        {habits.map(habit => (
-          <HabitCard
-            key={habit.id}
-            habit={habit}
-            checks={checks}
-            notes={notes}
-            weekDates={weekDates}
-            currentWeekKey={currentWeekKey}
-            todayKey={todayKey}
-            onToggleCheck={toggleCheck}
-            onUpdateNote={updateNote}
-            onDelete={onDeleteHabit}
-          />
-        ))}
-      </section>
-
-      <MonthlyStats
-        habits={habits}
-        checks={checks}
-        notes={notes}
-        open={statsOpen}
-        onToggle={() => setStatsOpen(o => !o)}
-      />
-    </div>
-  );
-}
-
-
-// ============================================================
-// SYSTEM ACCORDION
-// ============================================================
-
-function AccordionSection({ title, children }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="border-b border-white/5 last:border-0">
-      <button 
-        onClick={() => setOpen(!open)} 
-        className="w-full py-4 px-6 flex justify-between items-center hover:bg-white/2 transition-colors text-left"
-      >
-        <span className="text-[10px] font-bold uppercase tracking-widest text-brand-muted">{title}</span>
-        <span className={`material-symbols-outlined text-sm transition-transform ${open ? 'rotate-180' : ''}`}>
-          expand_more
-        </span>
-      </button>
-      {open && (
-        <div className="px-6 pb-6 animate-in slide-in-from-top-2 duration-200">
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SystemCard({ habit, system }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="glass-card overflow-hidden mb-6">
-      <button 
-        onClick={() => setOpen(!open)} 
-        className="w-full p-6 text-left flex justify-between items-center hover:bg-white/5 transition-colors"
-      >
-        <div>
-          <h3 className="text-xl font-bold text-white mb-1">{habit.name} Architecture</h3>
-          <p className="text-xs text-brand-muted uppercase tracking-widest font-bold">Generated AI System</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="px-3 py-1 rounded-full liquid-glass text-[10px] font-bold text-sky-400 tracking-widest uppercase">Verified</div>
-          <span className={`material-symbols-outlined transition-transform duration-300 ${open ? 'rotate-180' : ''}`}>
-            expand_more
-          </span>
-        </div>
-      </button>
-
-      {open && (
-        <div className="border-t border-white/5 animate-in fade-in duration-300">
-          <AccordionSection title="Identity & Beliefs">
-            <div className="space-y-4">
-              <div className="p-4 bg-white/5 border-l-2 border-violet-500 italic text-brand-primary">
-                "{system.identityPlan?.statement}"
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[8px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Identity Votes</label>
-                  <ul className="space-y-1">
-                    {system.identityPlan?.votes?.map((v, i) => (
-                      <li key={i} className="text-xs flex gap-2"><span className="text-violet-500">•</span> {v}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <label className="text-[8px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Daily Evidence</label>
-                  <p className="text-xs text-brand-primary">{system.identityPlan?.dailyEvidence}</p>
-                </div>
-              </div>
+            <div className="metric">
+              <div className="label">Indicador 2</div>
+              <div className="value">Noches con desayuno preparado</div>
             </div>
-          </AccordionSection>
-
-          <AccordionSection title="Core Infrastructure (The Four Laws)">
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-               {system.fourLaws?.map((law, i) => (
-                 <div key={i} className="liquid-glass p-4 rounded-xl">
-                   <div className="text-[8px] font-bold uppercase tracking-widest text-sky-400 mb-2">{law.law}</div>
-                   <div className="text-sm font-bold mb-1">{law.action}</div>
-                   <div className="text-[10px] text-brand-muted leading-tight">{law.environmentChange}</div>
-                 </div>
-               ))}
-             </div>
-          </AccordionSection>
-
-          <AccordionSection title="Friction Engineering">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                 <label className="text-[8px] font-bold uppercase tracking-widest text-emerald-400 block">Reduce (Building)</label>
-                 {system.frictionEngineering?.reduce?.map((r, i) => (
-                   <div key={i} className="text-xs p-2 bg-emerald-500/5 rounded border border-emerald-500/10 flex items-center gap-2">
-                     <span className="material-symbols-outlined text-xs text-emerald-400">arrow_downward</span> {r}
-                   </div>
-                 ))}
-              </div>
-              <div className="space-y-2">
-                 <label className="text-[8px] font-bold uppercase tracking-widest text-red-400 block">Increase (Breaking)</label>
-                 {system.frictionEngineering?.add?.map((a, i) => (
-                   <div key={i} className="text-xs p-2 bg-red-500/5 rounded border border-red-500/10 flex items-center gap-2">
-                     <span className="material-symbols-outlined text-xs text-red-400">arrow_upward</span> {a}
-                   </div>
-                 ))}
-              </div>
-            </div>
-          </AccordionSection>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function KeyVal({ label, value }) {
-  if (!value) return null;
-  return (
-    <div className="mb-4 last:mb-0">
-      <label className="text-[8px] font-bold uppercase tracking-widest text-brand-muted block mb-1">{label}</label>
-      <p className="text-sm text-brand-primary">{value}</p>
-    </div>
-  );
-}
-
-
-// ============================================================
-// SYSTEMS TAB
-// ============================================================
-
-function SystemsTab({ habits, systems, onGoToAdd }) {
-  const habitsWithSystems = habits.filter(h => systems[h.id]);
-
-  if (habitsWithSystems.length === 0) {
-    return (
-      <div className="text-center py-24 glass-card p-12">
-        <div className="text-6xl mb-6 grayscale opacity-20">🤖</div>
-        <h3 className="text-2xl font-bold mb-2 text-white">No hay sistemas generados</h3>
-        <p className="text-brand-muted text-sm max-w-sm mx-auto mb-8">
-          Utiliza la IA para diseñar una arquitectura de comportamiento personalizada para tus nuevos hábitos.
-        </p>
-        <button 
-          onClick={onGoToAdd} 
-          className="px-8 py-3 bg-white text-brand-bg rounded-full text-xs font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all"
-        >
-          Architect New Habit
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="mb-10">
-        <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Behavior Systems</h2>
-        <p className="text-brand-muted text-sm uppercase tracking-widest font-bold mt-1">
-          {habitsWithSystems.length} Active Architectures
-        </p>
-      </div>
-      <div className="space-y-6">
-        {habitsWithSystems.map(habit => (
-          <SystemCard key={habit.id} habit={habit} system={systems[habit.id]} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
-// ============================================================
-// ADD HABIT TAB
-// ============================================================
-
-const EMPTY_FORM = {
-  tipo: 'Construir',
-  habito: '',
-  identidad: '',
-  porQue: '',
-  lineaBase: '',
-  friccion1: '',
-  friccion2: '',
-  friccion3: '',
-  desencadenantes: '',
-  tiempo: '',
-  restricciones: '',
-  entorno: '',
-  recompensa: '',
-  responsabilidad: '',
-  metrics: [''],
-};
-
-function AddHabitTab({ onAdd }) {
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState({});
-
-  const setField = (key, val) => {
-    setForm(f => ({ ...f, [key]: val }));
-    setFieldErrors(e => ({ ...e, [key]: '' }));
-  };
-
-  const applyTemplate = (tpl) => {
-    setForm({
-      ...EMPTY_FORM,
-      ...tpl,
-      metrics: tpl.metrics.length > 0 ? tpl.metrics : [''],
-    });
-    setFieldErrors({});
-    setError('');
-  };
-
-  const validate = () => {
-    const errors = {};
-    if (!form.habito.trim()) errors.habito = 'Requerido';
-    if (!form.identidad.trim()) errors.identidad = 'Requerido';
-    if (!form.porQue.trim()) errors.porQue = 'Requerido';
-    if (!form.friccion1.trim()) errors.friccion1 = 'Requerido';
-    if (form.metrics.filter(m => m.trim()).length === 0) errors.metrics = 'Agregá al menos una métrica';
-    setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const generate = async () => {
-    if (!validate()) return;
-    setLoading(true);
-    setError('');
-
-    const userMessage = `Tipo de hábito: ${form.tipo}
-Hábito: ${form.habito}
-Identidad: ${form.identidad}
-Por qué es importante: ${form.porQue}
-Línea de base actual: ${form.lineaBase || 'No especificada'}
-Mis mayores puntos de fricción:
-- ${form.friccion1}
-- ${form.friccion2 || 'No especificado'}
-- ${form.friccion3 || 'No especificado'}
-Desencadenantes actuales: ${form.desencadenantes || 'No especificados'}
-Tiempo disponible por día: ${form.tiempo || 'No especificado'}
-Restricciones: ${form.restricciones || 'Ninguna'}
-Entorno: ${form.entorno || 'No especificado'}
-Recompensa preferida: ${form.recompensa || 'No especificada'}
-Responsabilidad: ${form.responsabilidad || 'No especificada'}`;
-
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-
-    if (!apiKey) {
-      setError('API key no encontrada. Definí VITE_GEMINI_API_KEY en tu archivo .env');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-            generationConfig: { maxOutputTokens: 4000, temperature: 0.7 },
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error?.message || `Error ${res.status}`);
-      }
-
-      const data = await res.json();
-      const text = data.candidates[0].content.parts[0].text;
-
-      let system;
-      try {
-        const clean = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
-        system = JSON.parse(clean);
-      } catch {
-        throw new Error('La respuesta de la IA no es JSON válido. Intentá de nuevo.');
-      }
-
-      const habitId = `habit-${Date.now()}`;
-      const newHabit = {
-        id: habitId,
-        name: form.habito,
-        description: form.identidad,
-        metrics: form.metrics.filter(m => m.trim()),
-        isDefault: false,
-        tipo: form.tipo,
-      };
-
-      onAdd(newHabit, system);
-      setForm(EMPTY_FORM);
-    } catch (err) {
-      setError(err.message || 'Error inesperado. Intentá de nuevo.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const addMetric = () => {
-    if (form.metrics.length < 5) setForm(f => ({ ...f, metrics: [...f.metrics, ''] }));
-  };
-
-  const removeMetric = (i) => {
-    if (form.metrics.length > 1) {
-      setForm(f => ({ ...f, metrics: f.metrics.filter((_, idx) => idx !== i) }));
-    }
-  };
-
-  const setMetric = (i, val) => {
-    setForm(f => {
-      const metrics = [...f.metrics];
-      metrics[i] = val;
-      return { ...f, metrics };
-    });
-  };
-
-  const inputClass = (hasError = false) => `w-full px-4 py-3 bg-white/5 border ${hasError ? 'border-red-500' : 'border-white/10'} rounded-2xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition-all placeholder:text-brand-muted/30`;
-
-  return (
-    <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="glass-card p-8">
-        <h2 className="text-3xl font-black mb-2 uppercase tracking-tighter">New Habit Discovery</h2>
-        <p className="text-brand-muted text-sm mb-8">Architect your character by adding a new intentional system.</p>
-
-        {/* Templates */}
-        <div className="mb-10">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-4">Jumpstart Templates</label>
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(TEMPLATES).map(([key, tpl]) => (
-              <button 
-                key={key} 
-                onClick={() => applyTemplate(tpl)}
-                className="px-4 py-2 rounded-full border border-white/10 hover:bg-white/10 text-xs font-bold transition-all text-brand-primary"
-              >
-                {tpl.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Form Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="col-span-full">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Hábito (Acción Específica) *</label>
-            <input 
-              value={form.habito} 
-              onChange={e => setField('habito', e.target.value)}
-              placeholder="Ej: Estudiar 30 minutos al día" 
-              className={inputClass(!!fieldErrors.habito)}
-            />
-          </div>
-          
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Identidad Basada *</label>
-            <input 
-              value={form.identidad} 
-              onChange={e => setField('identidad', e.target.value)}
-              placeholder="Ej: Soy alguien que aprende siempre" 
-              className={inputClass(!!fieldErrors.identidad)}
-            />
-          </div>
-
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Gran "Por Qué" *</label>
-            <input 
-              value={form.porQue} 
-              onChange={e => setField('porQue', e.target.value)}
-              placeholder="Ej: Libertad profesional" 
-              className={inputClass(!!fieldErrors.porQue)}
-            />
-          </div>
-
-          <div className="col-span-full">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Critical Friction Pt *</label>
-            <input 
-              value={form.friccion1} 
-              onChange={e => setField('friccion1', e.target.value)}
-              placeholder="Ej: El teléfono junto a la cama" 
-              className={inputClass(!!fieldErrors.friccion1)}
-            />
-          </div>
-
-          <div className="col-span-full">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-brand-muted block mb-2">Metrics to Track (1-5) *</label>
-            <div className="space-y-3">
-              {form.metrics.map((m, i) => (
-                <div key={i} className="flex gap-3">
-                  <input
-                    value={m}
-                    onChange={e => setMetric(i, e.target.value)}
-                    placeholder="Métrica de éxito..."
-                    className={inputClass()}
-                  />
-                  {form.metrics.length > 1 && (
-                    <button onClick={() => removeMetric(i)} className="p-3 rounded-2xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
-                      <span className="material-symbols-outlined">delete</span>
-                    </button>
-                  )}
-                </div>
-              ))}
-              {form.metrics.length < 5 && (
-                <button onClick={addMetric} className="w-full p-3 rounded-2xl border border-dashed border-white/20 text-[10px] font-bold uppercase tracking-widest text-brand-muted hover:border-white/40 transition-colors">
-                  + Add Metric Layer
-                </button>
-              )}
+            <div className="metric">
+              <div className="label">Indicador 3</div>
+              <div className="value">Tiempo real promedio del cierre de cocina</div>
             </div>
           </div>
-        </div>
+          <ul>
+            <li>¿Qué parte me dio más fiaca: lavar, secar, ordenar o empezar?</li>
+            <li>¿Dónde se traba más el cierre: bacha llena, secaplatos ocupado o bronca por limpiar ajeno?</li>
+            <li>¿Qué puedo preparar antes para que el cierre dure menos?</li>
+          </ul>
+          <div className="quote">
+            Única modificación de la próxima semana: poner un límite de 10 minutos al cierre y respetar la zona mínima no negociable.
+          </div>
+        </article>
 
-        {error && <div className="mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-xs">{error}</div>}
-
-        <button 
-          onClick={generate} 
-          disabled={loading}
-          className="w-full mt-10 py-4 bg-white text-brand-bg rounded-full font-black uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:hover:scale-100"
-        >
-          {loading ? (
-            <div className="w-5 h-5 border-2 border-brand-bg/30 border-t-brand-bg rounded-full animate-spin" />
-          ) : (
-            <span className="material-symbols-outlined">magic_button</span>
-          )}
-          {loading ? 'Analyzing Behavior Patterns...' : 'Architect System with AI'}
-        </button>
       </div>
-    </div>
+    </section>
   );
 }
 
-
-function Spinner() {
-  return (
-    <div style={{
-      width: '16px', height: '16px', border: '2px solid rgba(255,255,255,0.3)',
-      borderTop: '2px solid #fff', borderRadius: '50%',
-      animation: 'spin 0.7s linear infinite',
-    }} />
-  );
-}
-
-// ============================================================
-// APP (main export)
-// ============================================================
+// ─────────────────────────────────────────────
+// APP
+// ─────────────────────────────────────────────
 
 export default function App() {
-  const [theme, setTheme] = useState(() => loadLS('ah_theme', 'dark'));
-  const [activeTab, setActiveTab] = useState(0);
-  const [habits, setHabits] = useState(() => {
-    const saved = loadLS('ah_habits', null);
-    return saved === null ? DEFAULT_HABITS : saved;
-  });
-  const [checks, setChecks] = useState(() => loadLS('ah_checks', {}));
-  const [notes, setNotes] = useState(() => loadLS('ah_notes', {}));
-  const [systems, setSystems] = useState(() => loadLS('ah_systems', {}));
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(null);
-  const [statsOpen, setStatsOpen] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem('habit-theme-v2') || 'dark');
+  const [checks, setChecks] = useState(() => ensureStateShape(loadState()));
 
-  // Persist
-  useEffect(() => { saveLS('ah_theme', theme); }, [theme]);
-  useEffect(() => { saveLS('ah_habits', habits); }, [habits]);
-  useEffect(() => { saveLS('ah_checks', checks); }, [checks]);
-  useEffect(() => { saveLS('ah_notes', notes); }, [notes]);
-  useEffect(() => { saveLS('ah_systems', systems); }, [systems]);
+  useEffect(() => {
+    document.body.classList.toggle('light', theme === 'light');
+    localStorage.setItem('habit-theme-v2', theme);
+  }, [theme]);
 
-  const currentWeekKey = getWeekKey();
-  const weekDates = getWeekDatesFromKey(currentWeekKey);
-  const todayKey = getDateKey();
-
-  const toggleCheck = (habitId, dayIdx, metricIdx) => {
+  const handleCheck = useCallback((habitKey, metricKey, dayIndex, value) => {
     setChecks(prev => {
-      const next = { ...prev };
-      if (!next[currentWeekKey]) next[currentWeekKey] = {};
-      if (!next[currentWeekKey][habitId]) next[currentWeekKey][habitId] = {};
-      if (!next[currentWeekKey][habitId][dayIdx]) next[currentWeekKey][habitId][dayIdx] = {};
-      next[currentWeekKey][habitId][dayIdx][metricIdx] = !next[currentWeekKey][habitId][dayIdx][metricIdx];
+      const next = ensureStateShape({ ...prev });
+      next[habitKey] = { ...next[habitKey] };
+      next[habitKey][metricKey] = [...next[habitKey][metricKey]];
+      next[habitKey][metricKey][dayIndex] = value;
+      saveState(next);
       return next;
     });
-  };
+  }, []);
 
-  const updateNote = (habitId, dateKey, value) => {
-    setNotes(prev => {
-      const next = { ...prev };
-      if (!next[dateKey]) next[dateKey] = {};
-      next[dateKey][habitId] = value;
-      return next;
-    });
-  };
-
-  const resetWeek = () => {
-    setChecks(prev => {
-      const next = { ...prev };
-      delete next[currentWeekKey];
-      return next;
-    });
-    setNotes(prev => {
-      const next = { ...prev };
-      weekDates.forEach(d => { delete next[getDateKey(d)]; });
-      return next;
-    });
-    setShowResetModal(false);
-  };
-
-  const deleteHabit = (habitId) => {
-    setHabits(prev => prev.filter(h => h.id !== habitId));
-    setSystems(prev => {
-      const next = { ...prev };
-      delete next[habitId];
-      return next;
-    });
-    setShowDeleteModal(null);
-  };
-
-  const addHabit = (habit, system) => {
-    setHabits(prev => [...prev, habit]);
-    if (system) setSystems(prev => ({ ...prev, [habit.id]: system }));
-    setActiveTab(0);
+  const handleReset = () => {
+    if (window.confirm('Esto borra los checks de la semana actual. ¿Seguimos?')) {
+      localStorage.removeItem(storageKey());
+      setChecks(ensureStateShape({}));
+    }
   };
 
   return (
-    <div className={`${theme} min-h-screen transition-colors duration-500`}>
-      <Header
-        theme={theme}
-        setTheme={setTheme}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onResetWeek={() => setShowResetModal(true)}
-        onExportPDF={() => window.print()}
-      />
+    <div className="wrap">
 
-      <main className="max-w-7xl mx-auto pt-32 pb-24 px-6 relative z-10">
-        {activeTab === 0 && (
-          <DashboardTab
-            habits={habits}
-            checks={checks}
-            notes={notes}
-            weekDates={weekDates}
-            currentWeekKey={currentWeekKey}
-            todayKey={todayKey}
-            toggleCheck={toggleCheck}
-            updateNote={updateNote}
-            statsOpen={statsOpen}
-            setStatsOpen={setStatsOpen}
-            onDeleteHabit={(id) => setShowDeleteModal(id)}
-          />
-        )}
-        {activeTab === 1 && (
-          <SystemsTab
-            habits={habits}
-            systems={systems}
-            onGoToAdd={() => setActiveTab(2)}
-          />
-        )}
-        {activeTab === 2 && (
-          <AddHabitTab onAdd={addHabit} />
-        )}
-      </main>
+      {/* ── Hero ── */}
+      <section className="hero">
+        <span className="eyebrow">Sistema visual de hábitos · v2</span>
+        <h1>Ahora sí: checks reales, progreso semanal, tema claro/oscuro y PDF</h1>
+        <p className="lead">
+          Esta versión ya no es sólo linda. También sirve. Podés tildar avances, ver el progreso de la semana,
+          cambiar de tema y exportar a PDF directo desde el navegador.
+        </p>
+        <div className="footer-note small">
+          Los checks se guardan en <strong>tu navegador</strong>. Si abrís este archivo en el mismo navegador y en la misma compu,
+          te mantiene el estado. El PDF se exporta con el botón y usa la función de impresión del navegador.
+        </div>
+      </section>
 
-      {showResetModal && (
-        <Modal
-          title="Reset Architecture?"
-          message="This will dissolve all current weekly progress. The core systems will remain intact."
-          confirmLabel="Dissolve"
-          onConfirm={resetWeek}
-          onCancel={() => setShowResetModal(false)}
-          danger
-        />
-      )}
+      {/* ── Toolbar ── */}
+      <div className="toolbar">
+        <nav className="topnav">
+          <a href="#madrugar">Levantarme temprano</a>
+          <a href="#cocina">Limpieza de cocina</a>
+          <a href="#como">Cómo usarlo</a>
+        </nav>
+        <div className="toolbar-actions">
+          <button className="btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}>
+            {theme === 'light' ? '🌙 Modo oscuro' : '☀ Modo claro'}
+          </button>
+          <button className="btn success" onClick={handleReset}>↺ Reiniciar semana</button>
+          <button className="btn primary" onClick={() => window.print()}>⬇ Exportar PDF</button>
+        </div>
+      </div>
 
-      {showDeleteModal && (
-        <Modal
-          title="Deconstruct System?"
-          message="This will permanently delete this habit architecture. This action is irreversible."
-          confirmLabel="Deconstruct"
-          onConfirm={() => deleteHabit(showDeleteModal)}
-          onCancel={() => setShowDeleteModal(null)}
-          danger
-        />
-      )}
+      {/* ── Habit sections ── */}
+      <MadrugarSection checks={checks} onCheck={handleCheck} />
+      <CocinaSection checks={checks} onCheck={handleCheck} />
 
-      {/* Grid Pattern Overlay */}
-      <div className="fixed inset-0 pointer-events-none opacity-[0.03] select-none z-0" 
-           style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+      {/* ── Cómo usarlo ── */}
+      <section id="como" className="hero" style={{ marginTop: '22px' }}>
+        <span className="eyebrow">Cómo usarlo</span>
+        <h2 style={{ margin: '16px 0 10px', fontSize: '32px' }}>Qué hace esta versión 2</h2>
+        <div className="grid" style={{ padding: 0, marginTop: '10px' }}>
+          <div className="card cols-4">
+            <h3><span className="icon">✓</span>Checkboxes reales</h3>
+            <p className="muted">Cada semana tiene checks por día y por acción. Se guardan automáticamente en el navegador.</p>
+          </div>
+          <div className="card cols-4">
+            <h3><span className="icon">⏰</span>Barras de progreso</h3>
+            <p className="muted">Hay progreso total y progreso por métrica clave para que veas rápido si vas bien o te estás chamuyando solo.</p>
+          </div>
+          <div className="card cols-4">
+            <h3><span className="icon">✨</span>Claro / Oscuro + PDF</h3>
+            <p className="muted">Podés alternar entre temas. Y para exportar, el botón abre la impresión del navegador lista para guardar PDF.</p>
+          </div>
+        </div>
+        <div className="footer-note">
+          Si querés una versión 3, el salto lógico sería: <strong>estadísticas mensuales, racha automática, notas por día y plantillas para más hábitos</strong>.
+        </div>
+      </section>
+
     </div>
   );
 }
-
