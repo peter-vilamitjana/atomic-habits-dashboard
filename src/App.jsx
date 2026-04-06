@@ -85,6 +85,104 @@ function ensureStateShape(state) {
 }
 
 // ─────────────────────────────────────────────
+// STREAK & STATS UTILITIES
+// ─────────────────────────────────────────────
+
+function calcHabitWeekStreak(habitKey, checks) {
+  const state = ensureStateShape(checks);
+  const today = new Date();
+  const todayIdx = (today.getDay() + 6) % 7; // 0=Mon…6=Sun
+  let streak = 0;
+  for (let i = todayIdx; i >= 0; i--) {
+    const rows = TRACKER_CONFIG[habitKey].rows;
+    const anyChecked = rows.some(row => state[habitKey]?.[row.key]?.[i]);
+    if (anyChecked) streak++;
+    else break;
+  }
+  return streak;
+}
+
+function calcWeekStats(checks) {
+  const state = ensureStateShape(checks);
+  let done = 0, possible = 0;
+  for (const hk of Object.keys(TRACKER_CONFIG)) {
+    const rows = TRACKER_CONFIG[hk].rows;
+    possible += rows.length * 7;
+    rows.forEach(row => {
+      (state[hk][row.key] || []).forEach(v => { if (v) done++; });
+    });
+  }
+  const pct = possible === 0 ? 0 : Math.round((done / possible) * 100);
+  const bestStreak = Math.max(
+    calcHabitWeekStreak('madrugar', checks),
+    calcHabitWeekStreak('cocina', checks)
+  );
+  return { done, possible, pct, bestStreak };
+}
+
+// ─────────────────────────────────────────────
+// STATS ROW
+// ─────────────────────────────────────────────
+
+function StatsRow({ checks }) {
+  const { done, possible, pct, bestStreak } = calcWeekStats(checks);
+  return (
+    <div className="stat-section">
+      <div className="stat-card">
+        <div className="stat-card-top">
+          <div>
+            <span className="stat-card-label">Volumen</span>
+            <span className="stat-card-title">Checks esta semana</span>
+          </div>
+          <div className="stat-card-icon" style={{ color: '#a78bfa' }}>📊</div>
+        </div>
+        <div>
+          <div className="stat-card-value">
+            <span className="stat-card-number">{done}</span>
+            <span className="stat-card-unit">/ {possible}</span>
+          </div>
+          {done > 0 && <div className="stat-card-trend">↑ {pct}% de completitud</div>}
+        </div>
+      </div>
+
+      <div className="stat-card">
+        <div className="stat-card-top">
+          <div>
+            <span className="stat-card-label">Consistencia</span>
+            <span className="stat-card-title">Racha actual</span>
+          </div>
+          <div className="stat-card-icon" style={{ color: '#fbbf24' }}>⚡</div>
+        </div>
+        <div>
+          <div className="stat-card-value">
+            <span className="stat-card-number">{bestStreak}</span>
+            <span className="stat-card-unit">días</span>
+          </div>
+          {bestStreak > 0 && <div className="stat-card-trend">↑ Sin cortar la racha</div>}
+        </div>
+      </div>
+
+      <div className="stat-card">
+        <div className="stat-card-top">
+          <div>
+            <span className="stat-card-label">Eficiencia</span>
+            <span className="stat-card-title">Completitud semanal</span>
+          </div>
+          <div className="stat-card-icon" style={{ color: '#38bdf8' }}>🎯</div>
+        </div>
+        <div>
+          <div className="stat-card-value">
+            <span className="stat-card-number">{pct}</span>
+            <span className="stat-card-unit">%</span>
+          </div>
+          {pct >= 50 && <div className="stat-card-trend">↑ Por encima del 50%</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // PROGRESS CARD
 // ─────────────────────────────────────────────
 
@@ -205,23 +303,22 @@ function WeeklyTracker({ habitKey, checks, onCheck }) {
 // ─────────────────────────────────────────────
 
 function MadrugarSection({ checks, onCheck, activeTab }) {
+  const streak = calcHabitWeekStreak('madrugar', checks);
   return (
     <section id="madrugar" className="habit">
-      <div className="habit-head" style={activeTab === 'sistemas' ? {background: '#7c3aed', color: 'white'} : {}}>
-        <div className="habit-title">
-          <h2>Levantarme temprano y dormir temprano</h2>
-          {activeTab === 'dashboard' && (
-            <>
-              <span className="badge">Hábito de energía</span>
-              <span className="badge">Meta: 6:00 AM</span>
-            </>
-          )}
-        </div>
-        {activeTab === 'dashboard' && (
-          <p className="muted">
+      <div className="habit-head">
+        <div>
+          <div className="habit-eyebrow">🌅 Mañanas</div>
+          <div className="habit-title">
+            <h2>Levantarme temprano y dormir temprano</h2>
+            <span className="badge">Hábito de energía</span>
+            <span className="badge">Meta: 6:00 AM</span>
+          </div>
+          <p className="muted" style={{ margin: '8px 0 0' }}>
             Sistema para proteger la noche, simplificar el cierre del día y ganar la mañana sin depender de fuerza de voluntad.
           </p>
-        )}
+        </div>
+        <span className="streak-badge">RACHA: {String(streak).padStart(2, '0')}</span>
       </div>
 
       <div className="grid">
@@ -428,23 +525,22 @@ function MadrugarSection({ checks, onCheck, activeTab }) {
 // ─────────────────────────────────────────────
 
 function CocinaSection({ checks, onCheck, activeTab }) {
+  const streak = calcHabitWeekStreak('cocina', checks);
   return (
     <section id="cocina" className="habit">
-      <div className="habit-head kitchen" style={activeTab === 'sistemas' ? {background: '#22c55e', color: 'white'} : {}}>
-        <div className="habit-title">
-          <h2>Limpieza de cocina</h2>
-          {activeTab === 'dashboard' && (
-            <>
-              <span className="badge">Hábito de orden</span>
-              <span className="badge">Meta: cocina lista</span>
-            </>
-          )}
-        </div>
-        {activeTab === 'dashboard' && (
-          <p className="muted">
+      <div className="habit-head kitchen">
+        <div>
+          <div className="habit-eyebrow">🍳 Orden</div>
+          <div className="habit-title">
+            <h2>Limpieza de cocina</h2>
+            <span className="badge">Hábito de orden</span>
+            <span className="badge">Meta: cocina lista</span>
+          </div>
+          <p className="muted" style={{ margin: '8px 0 0' }}>
             Sistema corto, realista y sin volverte empleado de la casa: bacha, mesada y desayuno listo.
           </p>
-        )}
+        </div>
+        <span className="streak-badge">RACHA: {String(streak).padStart(2, '0')}</span>
       </div>
 
       <div className="grid">
@@ -701,6 +797,9 @@ export default function App() {
           <button className="btn primary" onClick={() => window.print()}>⬇ Exportar PDF</button>
         </div>
       </div>
+
+      {/* ── Stats row (dashboard only) ── */}
+      {activeTab === 'dashboard' && <StatsRow checks={checks} />}
 
       {/* ── Habit sections ── */}
       <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} />
