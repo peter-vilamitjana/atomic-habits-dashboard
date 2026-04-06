@@ -114,12 +114,18 @@ h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1.05; margin: 16px 0 10px; 
 
 .topnav { display: flex; gap: 10px; flex-wrap: wrap; }
 
-.topnav a {
-  color: var(--text); text-decoration: none; padding: 10px 14px;
+.topnav .tab-btn {
+  color: var(--text); padding: 10px 14px;
   background: var(--pill-bg); border: 1px solid var(--hero-border);
-  border-radius: 999px; font-size: 14px;
+  border-radius: 999px; font-size: 14px; cursor: pointer;
+  font-family: inherit; transition: all 0.2s ease;
 }
-.topnav a:hover { background: rgba(124,58,237,.18); }
+.topnav .tab-btn:hover { background: rgba(124,58,237,.18); }
+.topnav .tab-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: transparent;
+}
 
 .toolbar-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 

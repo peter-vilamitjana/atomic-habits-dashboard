@@ -204,30 +204,40 @@ function WeeklyTracker({ habitKey, checks, onCheck }) {
 // MADRUGAR SECTION
 // ─────────────────────────────────────────────
 
-function MadrugarSection({ checks, onCheck }) {
+function MadrugarSection({ checks, onCheck, activeTab }) {
   return (
     <section id="madrugar" className="habit">
-      <div className="habit-head">
+      <div className="habit-head" style={activeTab === 'sistemas' ? {background: '#7c3aed', color: 'white'} : {}}>
         <div className="habit-title">
           <h2>Levantarme temprano y dormir temprano</h2>
-          <span className="badge">Hábito de energía</span>
-          <span className="badge">Meta: 6:00 AM</span>
+          {activeTab === 'dashboard' && (
+            <>
+              <span className="badge">Hábito de energía</span>
+              <span className="badge">Meta: 6:00 AM</span>
+            </>
+          )}
         </div>
-        <p className="muted">
-          Sistema para proteger la noche, simplificar el cierre del día y ganar la mañana sin depender de fuerza de voluntad.
-        </p>
+        {activeTab === 'dashboard' && (
+          <p className="muted">
+            Sistema para proteger la noche, simplificar el cierre del día y ganar la mañana sin depender de fuerza de voluntad.
+          </p>
+        )}
       </div>
 
       <div className="grid">
 
         {/* Tracker */}
-        <article className="card cols-12">
-          <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
-          <p className="muted">Tildá sólo lo que realmente hiciste. El progreso se actualiza solo y queda guardado en este navegador.</p>
-          <WeeklyTracker habitKey="madrugar" checks={checks} onCheck={onCheck} />
-        </article>
+        <div style={{ display: activeTab === 'dashboard' ? 'contents' : 'none' }}>
+          <article className="card cols-12">
+            <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
+            <p className="muted">Tildá sólo lo que realmente hiciste. El progreso se actualiza solo y queda guardado en este navegador.</p>
+            <WeeklyTracker habitKey="madrugar" checks={checks} onCheck={onCheck} />
+          </article>
+        </div>
 
-        {/* Plan de identidad */}
+        {/* Sistemas Cards */}
+        <div style={{ display: activeTab === 'sistemas' ? 'contents' : 'none' }}>
+          {/* Plan de identidad */}
         <article className="card cols-6">
           <h3><span className="icon">A</span>Plan de identidad</h3>
           <p><strong>Declaración:</strong> Soy un madrugador que protege la noche para ganar la mañana.</p>
@@ -406,6 +416,7 @@ function MadrugarSection({ checks, onCheck }) {
             Única modificación de la próxima semana: adelantar 15 minutos la hora de "celular afuera" y no tocar nada más.
           </div>
         </article>
+        </div>
 
       </div>
     </section>
@@ -416,30 +427,40 @@ function MadrugarSection({ checks, onCheck }) {
 // COCINA SECTION
 // ─────────────────────────────────────────────
 
-function CocinaSection({ checks, onCheck }) {
+function CocinaSection({ checks, onCheck, activeTab }) {
   return (
     <section id="cocina" className="habit">
-      <div className="habit-head kitchen">
+      <div className="habit-head kitchen" style={activeTab === 'sistemas' ? {background: '#22c55e', color: 'white'} : {}}>
         <div className="habit-title">
           <h2>Limpieza de cocina</h2>
-          <span className="badge">Hábito de orden</span>
-          <span className="badge">Meta: cocina lista</span>
+          {activeTab === 'dashboard' && (
+            <>
+              <span className="badge">Hábito de orden</span>
+              <span className="badge">Meta: cocina lista</span>
+            </>
+          )}
         </div>
-        <p className="muted">
-          Sistema corto, realista y sin volverte empleado de la casa: bacha, mesada y desayuno listo.
-        </p>
+        {activeTab === 'dashboard' && (
+          <p className="muted">
+            Sistema corto, realista y sin volverte empleado de la casa: bacha, mesada y desayuno listo.
+          </p>
+        )}
       </div>
 
       <div className="grid">
 
         {/* Tracker */}
-        <article className="card cols-12">
-          <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
-          <p className="muted">Acá tenés el cierre de cocina convertido en acciones medibles. Lo ideal es no hacerlo perfecto; lo ideal es hacerlo.</p>
-          <WeeklyTracker habitKey="cocina" checks={checks} onCheck={onCheck} />
-        </article>
+        <div style={{ display: activeTab === 'dashboard' ? 'contents' : 'none' }}>
+          <article className="card cols-12">
+            <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
+            <p className="muted">Acá tenés el cierre de cocina convertido en acciones medibles. Lo ideal es no hacerlo perfecto; lo ideal es hacerlo.</p>
+            <WeeklyTracker habitKey="cocina" checks={checks} onCheck={onCheck} />
+          </article>
+        </div>
 
-        {/* Plan de identidad */}
+        {/* Sistemas Cards */}
+        <div style={{ display: activeTab === 'sistemas' ? 'contents' : 'none' }}>
+          {/* Plan de identidad */}
         <article className="card cols-6">
           <h3><span className="icon">A</span>Plan de identidad</h3>
           <p><strong>Declaración:</strong> Soy un hombre que deja la cocina lista para su mejor mañana.</p>
@@ -617,6 +638,7 @@ function CocinaSection({ checks, onCheck }) {
             Única modificación de la próxima semana: poner un límite de 10 minutos al cierre y respetar la zona mínima no negociable.
           </div>
         </article>
+        </div>
 
       </div>
     </section>
@@ -630,6 +652,7 @@ function CocinaSection({ checks, onCheck }) {
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('habit-theme-v2') || 'dark');
   const [checks, setChecks] = useState(() => ensureStateShape(loadState()));
+  const [activeTab, setActiveTab] = useState('dashboard');
 
   useEffect(() => {
     document.body.classList.toggle('light', theme === 'light');
@@ -674,9 +697,15 @@ export default function App() {
       {/* ── Toolbar ── */}
       <div className="toolbar">
         <nav className="topnav">
-          <a href="#madrugar">Levantarme temprano</a>
-          <a href="#cocina">Limpieza de cocina</a>
-          <a href="#como">Cómo usarlo</a>
+          <span style={{ fontWeight: 'bold', padding: '10px 14px', color: 'var(--text)', display: 'flex', alignItems: 'center' }}>🌿 ATOMIC</span>
+          <button 
+            className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dashboard')}
+          >Dashboard</button>
+          <button 
+            className={`tab-btn ${activeTab === 'sistemas' ? 'active' : ''}`}
+            onClick={() => setActiveTab('sistemas')}
+          >Sistemas</button>
         </nav>
         <div className="toolbar-actions">
           <button className="btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}>
@@ -688,11 +717,11 @@ export default function App() {
       </div>
 
       {/* ── Habit sections ── */}
-      <MadrugarSection checks={checks} onCheck={handleCheck} />
-      <CocinaSection checks={checks} onCheck={handleCheck} />
+      <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} />
+      <CocinaSection checks={checks} onCheck={handleCheck} activeTab={activeTab} />
 
       {/* ── Cómo usarlo ── */}
-      <section id="como" className="hero" style={{ marginTop: '22px' }}>
+      <section id="como" className="hero" style={{ marginTop: '22px', display: activeTab === 'dashboard' ? 'block' : 'none' }}>
         <span className="eyebrow">Cómo usarlo</span>
         <h2 style={{ margin: '16px 0 10px', fontSize: '32px' }}>Qué hace esta versión 2</h2>
         <div className="grid" style={{ padding: 0, marginTop: '10px' }}>
