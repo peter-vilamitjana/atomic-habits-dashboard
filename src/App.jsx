@@ -680,20 +680,6 @@ export default function App() {
   return (
     <div className="wrap">
 
-      {/* ── Hero ── */}
-      <section className="hero">
-        <span className="eyebrow">Sistema visual de hábitos · v2</span>
-        <h1>Ahora sí: checks reales, progreso semanal, tema claro/oscuro y PDF</h1>
-        <p className="lead">
-          Esta versión ya no es sólo linda. También sirve. Podés tildar avances, ver el progreso de la semana,
-          cambiar de tema y exportar a PDF directo desde el navegador.
-        </p>
-        <div className="footer-note small">
-          Los checks se guardan en <strong>tu navegador</strong>. Si abrís este archivo en el mismo navegador y en la misma compu,
-          te mantiene el estado. El PDF se exporta con el botón y usa la función de impresión del navegador.
-        </div>
-      </section>
-
       {/* ── Toolbar ── */}
       <div className="toolbar">
         <nav className="topnav">
