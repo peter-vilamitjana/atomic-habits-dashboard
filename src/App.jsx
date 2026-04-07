@@ -53,26 +53,6 @@ function weekKey() {
   return `${y}-${m}-${d}`;
 }
 
-function storageKey() {
-  return `habit-tracker-v2-${weekKey()}`;
-}
-
-// ─────────────────────────────────────────────
-// STATE PERSISTENCE
-// ─────────────────────────────────────────────
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(storageKey())) || {};
-  } catch {
-    return {};
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(storageKey(), JSON.stringify(state));
-}
-
 function ensureStateShape(state) {
   const result = { ...state };
   for (const habit of Object.keys(TRACKER_CONFIG)) {
@@ -85,19 +65,125 @@ function ensureStateShape(state) {
 }
 
 // ─────────────────────────────────────────────
+// NEW STORAGE LAYER (clave-por-día)
+// ─────────────────────────────────────────────
+
+function formatDateStr(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getEffectiveToday() {
+  const d = new Date(Date.now() - 4 * 60 * 60 * 1000);
+  d.setHours(0, 0, 0, 0);
+  return formatDateStr(d);
+}
+
+function getMondayWithOffset(offset = 0) {
+  const d = getMonday();
+  d.setDate(d.getDate() + offset * 7);
+  return d;
+}
+
+function getDateStrForDay(weekOffset, dayIndex) {
+  const monday = getMondayWithOffset(weekOffset);
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + dayIndex);
+  return formatDateStr(d);
+}
+
+function getHabitCheck(habitKey, dateStr) {
+  try {
+    const raw = localStorage.getItem(`habit-check-${habitKey}-${dateStr}`);
+    return raw ? JSON.parse(raw) : { rows: {}, completedCount: 0, totalCount: 0 };
+  } catch {
+    return { rows: {}, completedCount: 0, totalCount: 0 };
+  }
+}
+
+function saveHabitCheck(habitKey, rowKey, dateStr, checked) {
+  const key = `habit-check-${habitKey}-${dateStr}`;
+  const existing = getHabitCheck(habitKey, dateStr);
+  const rows = { ...existing.rows, [rowKey]: checked };
+  const completedCount = Object.values(rows).filter(Boolean).length;
+  const totalCount = TRACKER_CONFIG[habitKey].rows.length;
+  localStorage.setItem(key, JSON.stringify({
+    date: dateStr,
+    habitKey,
+    rows,
+    completedCount,
+    totalCount,
+    updatedAt: new Date().toISOString(),
+  }));
+}
+
+function loadWeekStateNew(weekOffset = 0) {
+  const result = {};
+  const monday = getMondayWithOffset(weekOffset);
+  for (const habitKey of Object.keys(TRACKER_CONFIG)) {
+    result[habitKey] = {};
+    for (const row of TRACKER_CONFIG[habitKey].rows) {
+      result[habitKey][row.key] = Array(7).fill(false);
+    }
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateStr = formatDateStr(d);
+      const dayData = getHabitCheck(habitKey, dateStr);
+      for (const row of TRACKER_CONFIG[habitKey].rows) {
+        result[habitKey][row.key][i] = dayData.rows[row.key] || false;
+      }
+    }
+  }
+  return result;
+}
+
+function migrateOldData() {
+  if (localStorage.getItem('habit-tracker-migrated-v3')) return;
+  const keysToMigrate = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('habit-tracker-v2-')) keysToMigrate.push(k);
+  }
+  for (const storKey of keysToMigrate) {
+    const mondayStr = storKey.replace('habit-tracker-v2-', '');
+    const monday = new Date(mondayStr + 'T00:00:00');
+    if (isNaN(monday.getTime())) continue;
+    try {
+      const data = JSON.parse(localStorage.getItem(storKey) || '{}');
+      for (const habitKey of Object.keys(TRACKER_CONFIG)) {
+        if (!data[habitKey]) continue;
+        for (const row of TRACKER_CONFIG[habitKey].rows) {
+          const dayArray = data[habitKey][row.key] || [];
+          dayArray.forEach((checked, dayIndex) => {
+            if (checked) {
+              const d = new Date(monday);
+              d.setDate(monday.getDate() + dayIndex);
+              saveHabitCheck(habitKey, row.key, formatDateStr(d), true);
+            }
+          });
+        }
+      }
+    } catch { /* skip malformed */ }
+  }
+  localStorage.setItem('habit-tracker-migrated-v3', 'true');
+}
+
+// ─────────────────────────────────────────────
 // STREAK & STATS UTILITIES
 // ─────────────────────────────────────────────
 
-function calcHabitWeekStreak(habitKey, checks) {
-  const state = ensureStateShape(checks);
-  const today = new Date();
-  const todayIdx = (today.getDay() + 6) % 7; // 0=Mon…6=Sun
+function calcCurrentStreak(habitKey) {
+  let date = new Date(getEffectiveToday() + 'T00:00:00');
   let streak = 0;
-  for (let i = todayIdx; i >= 0; i--) {
-    const rows = TRACKER_CONFIG[habitKey].rows;
-    const anyChecked = rows.some(row => state[habitKey]?.[row.key]?.[i]);
-    if (anyChecked) streak++;
-    else break;
+  while (streak <= 365) {
+    const dateStr = formatDateStr(date);
+    const data = getHabitCheck(habitKey, dateStr);
+    if (data.completedCount === 0) break;
+    streak++;
+    date.setDate(date.getDate() - 1);
   }
   return streak;
 }
@@ -113,11 +199,7 @@ function calcWeekStats(checks) {
     });
   }
   const pct = possible === 0 ? 0 : Math.round((done / possible) * 100);
-  const bestStreak = Math.max(
-    calcHabitWeekStreak('madrugar', checks),
-    calcHabitWeekStreak('cocina', checks)
-  );
-  return { done, possible, pct, bestStreak };
+  return { done, possible, pct };
 }
 
 // ─────────────────────────────────────────────
@@ -125,7 +207,8 @@ function calcWeekStats(checks) {
 // ─────────────────────────────────────────────
 
 function StatsRow({ checks }) {
-  const { done, possible, pct, bestStreak } = calcWeekStats(checks);
+  const { done, possible, pct } = calcWeekStats(checks);
+  const bestStreak = Math.max(calcCurrentStreak('madrugar'), calcCurrentStreak('cocina'));
   return (
     <div className="stat-section">
       <div className="stat-card">
@@ -205,8 +288,8 @@ function ProgressCard({ title, done, total }) {
 // WEEKLY TRACKER
 // ─────────────────────────────────────────────
 
-function WeeklyTracker({ habitKey, checks, onCheck }) {
-  const monday = getMonday();
+function WeeklyTracker({ habitKey, checks, onCheck, weekOffset, onWeekOffsetChange }) {
+  const monday = getMondayWithOffset(weekOffset);
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -246,7 +329,23 @@ function WeeklyTracker({ habitKey, checks, onCheck }) {
   return (
     <>
       <div className="status-row">
-        <span className="status-chip">{formatDateRange(monday)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            className="btn"
+            onClick={() => onWeekOffsetChange(weekOffset - 1)}
+            disabled={weekOffset <= -4}
+            style={{ padding: '3px 10px', minWidth: 'unset' }}
+          >‹</button>
+          <span className="status-chip" style={{ minWidth: '200px', textAlign: 'center' }}>
+            {weekOffset < 0 ? '✏ ' : ''}{formatDateRange(monday)}
+          </span>
+          <button
+            className="btn"
+            onClick={() => onWeekOffsetChange(weekOffset + 1)}
+            disabled={weekOffset >= 0}
+            style={{ padding: '3px 10px', minWidth: 'unset' }}
+          >›</button>
+        </div>
         <span className="status-chip">{tipText}</span>
       </div>
 
@@ -254,7 +353,7 @@ function WeeklyTracker({ habitKey, checks, onCheck }) {
       <div className="tracker-grid">
         <div className="tracker-head">
           <strong>Acción</strong>
-          Semana actual
+          {weekOffset === 0 ? 'Semana actual' : weekOffset === -1 ? 'Semana pasada' : `Hace ${Math.abs(weekOffset)} semanas`}
         </div>
         {days.map((date, i) => (
           <div key={i} className="tracker-head">
@@ -276,7 +375,7 @@ function WeeklyTracker({ habitKey, checks, onCheck }) {
               <input
                 type="checkbox"
                 checked={Boolean(state[habitKey]?.[row.key]?.[i])}
-                onChange={e => onCheck(habitKey, row.key, i, e.target.checked)}
+                onChange={e => onCheck(habitKey, row.key, i, e.target.checked, getDateStrForDay(weekOffset, i))}
                 aria-label={`${row.label} día ${i + 1}`}
               />
             </div>
@@ -302,8 +401,8 @@ function WeeklyTracker({ habitKey, checks, onCheck }) {
 // MADRUGAR SECTION
 // ─────────────────────────────────────────────
 
-function MadrugarSection({ checks, onCheck, activeTab }) {
-  const streak = calcHabitWeekStreak('madrugar', checks);
+function MadrugarSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetChange }) {
+  const streak = calcCurrentStreak('madrugar');
   return (
     <section id="madrugar" className="habit">
       <div className="habit-head">
@@ -328,7 +427,7 @@ function MadrugarSection({ checks, onCheck, activeTab }) {
           <article className="card cols-12">
             <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
             <p className="muted">Tildá sólo lo que realmente hiciste. El progreso se actualiza solo y queda guardado en este navegador.</p>
-            <WeeklyTracker habitKey="madrugar" checks={checks} onCheck={onCheck} />
+            <WeeklyTracker habitKey="madrugar" checks={checks} onCheck={onCheck} weekOffset={weekOffset} onWeekOffsetChange={onWeekOffsetChange} />
           </article>
         </div>
 
@@ -524,8 +623,8 @@ function MadrugarSection({ checks, onCheck, activeTab }) {
 // COCINA SECTION
 // ─────────────────────────────────────────────
 
-function CocinaSection({ checks, onCheck, activeTab }) {
-  const streak = calcHabitWeekStreak('cocina', checks);
+function CocinaSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetChange }) {
+  const streak = calcCurrentStreak('cocina');
   return (
     <section id="cocina" className="habit">
       <div className="habit-head kitchen">
@@ -550,7 +649,7 @@ function CocinaSection({ checks, onCheck, activeTab }) {
           <article className="card cols-12">
             <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
             <p className="muted">Acá tenés el cierre de cocina convertido en acciones medibles. Lo ideal es no hacerlo perfecto; lo ideal es hacerlo.</p>
-            <WeeklyTracker habitKey="cocina" checks={checks} onCheck={onCheck} />
+            <WeeklyTracker habitKey="cocina" checks={checks} onCheck={onCheck} weekOffset={weekOffset} onWeekOffsetChange={onWeekOffsetChange} />
           </article>
         </div>
 
@@ -747,30 +846,94 @@ function CocinaSection({ checks, onCheck, activeTab }) {
 
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('habit-theme-v2') || 'dark');
-  const [checks, setChecks] = useState(() => ensureStateShape(loadState()));
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [checks, setChecks] = useState(() => {
+    migrateOldData();
+    return loadWeekStateNew(0);
+  });
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [showBanner, setShowBanner] = useState(() => !localStorage.getItem('habit-tracker-onboarded'));
+  const [importError, setImportError] = useState(null);
 
   useEffect(() => {
     document.body.classList.toggle('light', theme === 'light');
     localStorage.setItem('habit-theme-v2', theme);
   }, [theme]);
 
-  const handleCheck = useCallback((habitKey, metricKey, dayIndex, value) => {
+  useEffect(() => {
+    setChecks(loadWeekStateNew(weekOffset));
+  }, [weekOffset]);
+
+  const handleCheck = useCallback((habitKey, metricKey, dayIndex, value, dateStr) => {
+    saveHabitCheck(habitKey, metricKey, dateStr, value);
     setChecks(prev => {
       const next = ensureStateShape({ ...prev });
       next[habitKey] = { ...next[habitKey] };
       next[habitKey][metricKey] = [...next[habitKey][metricKey]];
       next[habitKey][metricKey][dayIndex] = value;
-      saveState(next);
       return next;
     });
   }, []);
 
   const handleReset = () => {
     if (window.confirm('Esto borra los checks de la semana actual. ¿Seguimos?')) {
-      localStorage.removeItem(storageKey());
-      setChecks(ensureStateShape({}));
+      const monday = getMondayWithOffset(weekOffset);
+      for (const habitKey of Object.keys(TRACKER_CONFIG)) {
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(monday);
+          d.setDate(monday.getDate() + i);
+          const dateStr = formatDateStr(d);
+          localStorage.removeItem(`habit-check-${habitKey}-${dateStr}`);
+        }
+      }
+      setChecks(loadWeekStateNew(weekOffset));
     }
+  };
+
+  const handleExport = () => {
+    const allData = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('habit-check-') || key.startsWith('habit-tracker'))) {
+        allData[key] = localStorage.getItem(key);
+      }
+    }
+    const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `habitos-backup-${getEffectiveToday()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!window.confirm('Esto va a reemplazar tus datos actuales. ¿Continuás?')) {
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        Object.entries(data).forEach(([key, value]) => {
+          localStorage.setItem(key, value);
+        });
+        setChecks(loadWeekStateNew(weekOffset));
+        setImportError(null);
+      } catch {
+        setImportError('El archivo no es válido.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const dismissBanner = () => {
+    localStorage.setItem('habit-tracker-onboarded', 'true');
+    setShowBanner(false);
   };
 
   return (
@@ -793,17 +956,46 @@ export default function App() {
           <button className="btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}>
             {theme === 'light' ? '🌙 Modo oscuro' : '☀ Modo claro'}
           </button>
+          <button className="btn" onClick={handleExport}>⬇ Exportar datos</button>
+          <label className="btn" style={{ cursor: 'pointer' }}>
+            ⬆ Importar
+            <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+          </label>
           <button className="btn success" onClick={handleReset}>↺ Reiniciar semana</button>
           <button className="btn primary" onClick={() => window.print()}>⬇ Exportar PDF</button>
         </div>
       </div>
 
+      {/* ── Banner primera visita ── */}
+      {showBanner && activeTab === 'dashboard' && (
+        <div style={{
+          background: 'var(--card-bg)',
+          border: '1px solid var(--border)',
+          borderRadius: '10px',
+          padding: '12px 18px',
+          margin: '16px 0 0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}>
+          <span style={{ flex: 1, fontSize: '14px' }}>
+            💾 Tus datos viven en este navegador. Exportalos cada semana para no perderlos.
+          </span>
+          <button className="btn primary" onClick={() => { handleExport(); dismissBanner(); }}>Exportar ahora</button>
+          <button className="btn" onClick={dismissBanner}>Entendido</button>
+        </div>
+      )}
+      {importError && (
+        <div style={{ color: 'red', padding: '8px 0', fontSize: '13px' }}>{importError}</div>
+      )}
+
       {/* ── Stats row (dashboard only) ── */}
       {activeTab === 'dashboard' && <StatsRow checks={checks} />}
 
       {/* ── Habit sections ── */}
-      <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} />
-      <CocinaSection checks={checks} onCheck={handleCheck} activeTab={activeTab} />
+      <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
+      <CocinaSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
 
       {/* ── Cómo usarlo ── */}
       <section id="como" className="hero" style={{ marginTop: '22px', display: activeTab === 'dashboard' ? 'block' : 'none' }}>
