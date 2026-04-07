@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 // ─────────────────────────────────────────────
 // CONFIG
@@ -226,49 +226,54 @@ function isDayCompleted(dateStr) {
   return false;
 }
 
-function MonthlyCard() {
+function HabitHeatmap({ habitKey }) {
   const today = getEffectiveToday();
   const todayDate = new Date(today + 'T12:00:00Z');
   const year = todayDate.getUTCFullYear();
 
-  // Empezar desde el lunes de la semana que contiene el 1 de enero
   const jan1 = new Date(Date.UTC(year, 0, 1, 12, 0, 0));
-  const jan1Weekday = getBADateParts(jan1).weekday; // 0=dom,1=lun..6=sab
+  const jan1Weekday = getBADateParts(jan1).weekday;
   const daysToMonday = jan1Weekday === 0 ? 6 : jan1Weekday - 1;
   const gridStart = new Date(jan1);
   gridStart.setUTCDate(jan1.getUTCDate() - daysToMonday);
 
-  // Generar todos los dots desde gridStart hasta hoy
+  const totalRows = TRACKER_CONFIG[habitKey].rows.length;
+
   const dots = [];
   let current = new Date(gridStart);
-  while (formatDateStr(current) <= today) {
+
+  while (true) {
     const dateStr = formatDateStr(current);
-    const currentMonth = current.getUTCMonth();
     const isThisYear = current.getUTCFullYear() === year;
-    
-    let type = 'outside'; // fuera del año actual
+
+    let type = 'outside';
     if (isThisYear) {
-      const madrugarCount = getHabitCheck('madrugar', dateStr).completedCount;
-      const cocinaCount = getHabitCheck('cocina', dateStr).completedCount;
-      const doneCount = madrugarCount + cocinaCount;
-      const totalCount = TRACKER_CONFIG.madrugar.rows.length + TRACKER_CONFIG.cocina.rows.length;
-      if (doneCount === totalCount && doneCount > 0) type = 'total';
-      else if (doneCount > 0) type = 'parcial';
+      const data = getHabitCheck(habitKey, dateStr);
+      if (data.completedCount === totalRows && data.completedCount > 0) type = 'total';
+      else if (data.completedCount > 0) type = 'parcial';
       else type = 'empty';
     }
-    
-    dots.push({ 
-      id: dateStr, 
-      type, 
-      dateStr,
-      month: current.getUTCMonth(),
-      isToday: dateStr === today,
-    });
+
+    dots.push({ id: dateStr, type, dateStr, isToday: dateStr === today });
+
+    // Cortar DESPUÉS de agregar el dot de hoy
+    if (dateStr === today) break;
+
+    // Seguridad: no pasar de 400 días
+    if (dots.length > 400) break;
+
     current = new Date(current);
     current.setUTCDate(current.getUTCDate() + 1);
   }
 
-  // Calcular labels de meses
+  // Padding al final para completar la última columna
+  const remainder = dots.length % 7;
+  if (remainder !== 0) {
+    for (let p = 0; p < 7 - remainder; p++) {
+      dots.push({ id: `end-pad-${p}`, type: 'outside', dateStr: null, isToday: false });
+    }
+  }
+
   const totalCols = Math.ceil(dots.length / 7);
   const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const monthLabels = [];
@@ -284,130 +289,149 @@ function MonthlyCard() {
     }
   }
 
-  const DOT = 11;  // tamaño del dot en px
-  const GAP = 4;   // gap entre dots en px
-  const STEP = DOT + GAP; // 15px por celda
+  const isMadrugar = habitKey === 'madrugar';
+  const accentColor = isMadrugar ? '#bd9dff' : '#6bff8f';
+  const accentGlow = isMadrugar ? 'rgba(189,157,255,0.4)' : 'rgba(107,255,143,0.4)';
+  const parcialColor = isMadrugar ? 'rgba(189,157,255,0.25)' : 'rgba(107,255,143,0.25)';
+  const headerGradient = isMadrugar
+    ? 'linear-gradient(90deg, rgba(138,76,252,0.8), rgba(189,157,255,0.3))'
+    : 'linear-gradient(90deg, rgba(0,110,47,0.8), rgba(107,255,143,0.3))';
+  const title = isMadrugar ? 'MAÑANA' : 'COCINA';
 
-  const dotColor = (type, isToday) => {
+  const DOT = 11;
+  const GAP = 4;
+  const STEP = DOT + GAP;
+
+  const dotColor = (type) => {
     if (type === 'outside') return 'transparent';
-    if (type === 'total') return '#6bff8f';
-    if (type === 'parcial') return 'rgba(107,255,143,0.3)';
+    if (type === 'total') return accentColor;
+    if (type === 'parcial') return parcialColor;
     return 'rgba(255,255,255,0.07)';
   };
 
-  const dotGlow = (type) => {
-    if (type === 'total') return '0 0 6px rgba(107,255,143,0.4)';
-    return 'none';
-  };
-
   return (
-    <section style={{
+    <div style={{
       background: 'rgba(22,31,63,0.6)',
       backdropFilter: 'blur(14px)',
       WebkitBackdropFilter: 'blur(14px)',
       border: '1px solid rgba(255,255,255,0.07)',
       borderRadius: '24px',
-      padding: '28px 32px',
-      marginTop: '32px',
-      width: '100%',
-      boxSizing: 'border-box',
+      overflow: 'hidden',
+      flex: 1,
+      minWidth: 0,
     }}>
-
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <p style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.25em', color: '#a6aac0', margin: '0 0 4px' }}>
-            Consistencia {year}
-          </p>
-          <span style={{ fontSize: '18px', fontWeight: 700, color: '#e0e4fb' }}>
-            {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][todayDate.getUTCMonth()]} {year}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+      {/* Header con gradiente de color */}
+      <div style={{
+        background: headerGradient,
+        padding: '16px 24px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+      }}>
+        <span style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.2em', color: 'white' }}>
+          {title}
+        </span>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           {[
-            { color: 'rgba(255,255,255,0.07)', label: 'Sin datos' },
-            { color: 'rgba(107,255,143,0.3)', label: 'Parcial' },
-            { color: '#6bff8f', label: 'Total', glow: '0 0 6px rgba(107,255,143,0.4)' },
+            { color: 'rgba(255,255,255,0.15)', label: 'Sin datos' },
+            { color: parcialColor, label: 'Parcial' },
+            { color: accentColor, label: 'Total' },
           ].map(item => (
-            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{ width: '10px', height: '10px', borderRadius: '3px', background: item.color, boxShadow: item.glow || 'none', flexShrink: 0 }} />
-              <span style={{ fontSize: '9px', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.08em', color: '#a6aac0', whiteSpace: 'nowrap' }}>{item.label}</span>
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: item.color, flexShrink: 0 }} />
+              <span style={{ fontSize: '8px', textTransform: 'uppercase', fontWeight: 700, color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap' }}>{item.label}</span>
             </div>
           ))}
         </div>
       </div>
 
       {/* Grid */}
-      <div style={{ width: '100%', overflowX: 'auto' }}>
+      <div style={{ padding: '20px 24px', overflowX: 'auto' }}>
         <div style={{ display: 'inline-block', minWidth: '100%' }}>
 
-          {/* Labels de meses — posicionados absolutamente sobre el grid */}
-          <div style={{ position: 'relative', height: '18px', marginLeft: '28px', marginBottom: '4px' }}>
+          {/* Labels meses */}
+          <div style={{ position: 'relative', height: '16px', marginLeft: '30px', marginBottom: '4px' }}>
             {monthLabels.map(({ col, label }) => (
               <span key={label} style={{
                 position: 'absolute',
                 left: `${col * STEP}px`,
-                fontSize: '10px',
-                fontWeight: 700,
-                color: '#a6aac0',
-                whiteSpace: 'nowrap',
-                lineHeight: '18px',
-              }}>
-                {label}
-              </span>
+                fontSize: '10px', fontWeight: 700, color: '#a6aac0', whiteSpace: 'nowrap',
+              }}>{label}</span>
             ))}
           </div>
 
           {/* Días + dots */}
           <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-
             {/* Labels L M M J V S D */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: `${GAP}px`, paddingTop: '0', flexShrink: 0, width: '22px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: `${GAP}px`, flexShrink: 0, width: '24px' }}>
               {['Lun','','Mié','','Vie','','Dom'].map((d, i) => (
-                <div key={i} style={{
-                  height: `${DOT}px`,
-                  fontSize: '9px',
-                  color: '#a6aac0',
-                  fontWeight: 600,
-                  lineHeight: `${DOT}px`,
-                  textAlign: 'right',
-                  whiteSpace: 'nowrap',
-                }}>{d}</div>
+                <div key={i} style={{ height: `${DOT}px`, fontSize: '9px', color: '#a6aac0', fontWeight: 600, lineHeight: `${DOT}px`, textAlign: 'right' }}>{d}</div>
               ))}
             </div>
-
-            {/* Dot grid */}
-            <div style={{
-              display: 'grid',
-              gridTemplateRows: `repeat(7, ${DOT}px)`,
-              gridAutoFlow: 'column',
-              gridAutoColumns: `${DOT}px`,
-              gap: `${GAP}px`,
-            }}>
-              {dots.map(dot => (
-                <div
-                  key={dot.id}
-                  title={dot.dateStr}
-                  style={{
-                    width: `${DOT}px`,
-                    height: `${DOT}px`,
-                    borderRadius: '3px',
-                    background: dotColor(dot.type),
-                    boxShadow: dot.isToday 
-                      ? '0 0 0 1.5px #bd9dff' 
-                      : dotGlow(dot.type),
-                    transition: 'transform 0.1s',
-                    flexShrink: 0,
-                  }}
-                />
-              ))}
+            {/* Grid por columnas con separadores */}
+            <div style={{ display: 'flex', gap: `${GAP}px`, alignItems: 'flex-start' }}>
+              {Array.from({ length: totalCols }).map((_, col) => {
+                const colDots = dots.slice(col * 7, col * 7 + 7);
+                const isFirstColOfMonth = monthLabels.some(m => m.col === col) && col > 0;
+                return (
+                  <React.Fragment key={col}>
+                    {isFirstColOfMonth && (
+                      <div style={{
+                        width: '1px',
+                        height: `${7 * DOT + 6 * GAP}px`,
+                        background: 'rgba(255,255,255,0.1)',
+                        flexShrink: 0,
+                      }} />
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: `${GAP}px` }}>
+                      {Array.from({ length: 7 }).map((_, row) => {
+                        const dot = colDots[row];
+                        return (
+                          <div key={row} title={dot?.dateStr || ''} style={{
+                            width: `${DOT}px`, height: `${DOT}px`,
+                            borderRadius: '3px',
+                            background: dot ? dotColor(dot.type) : 'transparent',
+                            boxShadow: dot?.isToday
+                              ? `0 0 0 1.5px ${accentColor}`
+                              : dot?.type === 'total' ? `0 0 5px ${accentGlow}` : 'none',
+                            flexShrink: 0,
+                          }} />
+                        );
+                      })}
+                    </div>
+                  </React.Fragment>
+                );
+              })}
             </div>
-
           </div>
+
         </div>
       </div>
+    </div>
+  );
+}
 
-    </section>
+function MonthlyCard() {
+  const today = getEffectiveToday();
+  const todayDate = new Date(today + 'T12:00:00Z');
+  const year = todayDate.getUTCFullYear();
+  const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  return (
+    <div style={{ marginTop: '32px', width: '100%' }}>
+      <div style={{ marginBottom: '16px' }}>
+        <p style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.25em', color: '#a6aac0', margin: '0 0 4px' }}>
+          Consistencia {year}
+        </p>
+        <span style={{ fontSize: '18px', fontWeight: 700, color: '#e0e4fb' }}>
+          Enero → {monthNames[todayDate.getUTCMonth()]} {year}
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: '16px', width: '100%' }}>
+        <HabitHeatmap habitKey="madrugar" />
+        <HabitHeatmap habitKey="cocina" />
+      </div>
+    </div>
   );
 }
 
@@ -415,11 +439,30 @@ function MonthlyCard() {
 // STATS ROW
 // ─────────────────────────────────────────────
 
+function calcWeekStatsByOffset(offset) {
+  const weekChecks = loadWeekStateNew(offset);
+  const state = ensureStateShape(weekChecks);
+  let done = 0, possible = 0;
+  for (const hk of Object.keys(TRACKER_CONFIG)) {
+    const rows = TRACKER_CONFIG[hk].rows;
+    possible += rows.length * 7;
+    rows.forEach(row => {
+      (state[hk][row.key] || []).forEach(v => { if (v) done++; });
+    });
+  }
+  const pct = possible === 0 ? 0 : Math.round((done / possible) * 100);
+  return { done, possible, pct };
+}
+
 function StatsRow({ checks }) {
   const { done, possible, pct } = calcWeekStats(checks);
   const bestStreak = Math.max(calcCurrentStreak('madrugar'), calcCurrentStreak('cocina'));
+  const { pct: pctPrevWeek } = calcWeekStatsByOffset(-1);
+  const delta = pct - pctPrevWeek;
+  const deltaText = delta > 0 ? `+${delta}%` : delta < 0 ? `${delta}%` : `=`;
+  const deltaColor = delta > 0 ? '#6bff8f' : delta < 0 ? '#fb7185' : '#a6aac0';
   return (
-    <header className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-16">
+    <header className="grid grid-cols-2 md:grid-cols-4 gap-12 mb-16">
       <div className="space-y-1">
         <p style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#a6aac0', whiteSpace: 'nowrap' }}>Checks esta semana</p>
         <p style={{ fontSize: '60px', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: 'white' }}>{done}</p>
@@ -435,6 +478,13 @@ function StatsRow({ checks }) {
         <p style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#a6aac0', whiteSpace: 'nowrap' }}>Completitud semanal</p>
         <p style={{ fontSize: '60px', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: '#6bff8f' }}>{pct}%</p>
       </div>
+      <div className="space-y-1">
+        <p style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#a6aac0', whiteSpace: 'nowrap' }}>vs semana anterior</p>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+          <span style={{ fontSize: '60px', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: deltaColor }}>{deltaText}</span>
+        </div>
+        <p style={{ fontSize: '11px', color: '#a6aac0', marginTop: '4px' }}>semana pasada: {pctPrevWeek}%</p>
+      </div>
     </header>
   );
 }
@@ -448,6 +498,11 @@ const NewHabitCard = ({ habitKey, activeTab, weekOffset, onWeekOffsetChange, che
      return children;
   }
   if (activeTab === 'dashboard') {
+     const [selectedPastDay, setSelectedPastDay] = React.useState(6);
+     React.useEffect(() => {
+       setSelectedPastDay(6);
+     }, [weekOffset]);
+
      const streak = calcCurrentStreak(habitKey);
      const title = habitKey === 'madrugar' ? 'MAÑANA' : 'ENFOQUE';
      const headerClass = habitKey === 'madrugar' ? 'bg-gradient-to-r from-[#8a4cfc] to-[#bd9dff]/40' : 'bg-gradient-to-r from-secondary-container to-secondary/40';
@@ -475,13 +530,51 @@ const NewHabitCard = ({ habitKey, activeTab, weekOffset, onWeekOffsetChange, che
         <div className="glass-card rounded-lg overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-2xl">
           <div className={`px-8 py-5 ${headerClass} flex justify-between items-center`}>
             <h3 className="text-sm font-black tracking-[0.2em] uppercase text-white">{title}</h3>
-            <span className="text-[10px] font-black bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm text-white/90">RACHA: {String(streak).padStart(2, '0')}</span>
+            <span className="flex items-center gap-1 text-[10px] font-black bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm text-white/90">
+              <span className="material-symbols-outlined text-[12px] text-white/60">local_fire_department</span>
+              {String(streak).padStart(2, '0')}
+            </span>
           </div>
           <div className="p-8 flex flex-col flex-1">
-            <div className={`space-y-6 mb-10 ${!isCurrentWeek ? 'opacity-50 pointer-events-none' : ''}`}>
-              {!isCurrentWeek && <p style={{ fontSize: '10px', color: '#a6aac0', textAlign: 'center', marginBottom: '8px', opacity: 0.6 }}>✏ semana anterior</p>}
+            <div className="space-y-6 mb-10">
+              {!isCurrentWeek && (
+                <div style={{ marginBottom: '16px' }}>
+                  <p style={{ fontSize: '10px', color: '#a6aac0', marginBottom: '8px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    ✏ Editando semana pasada — seleccioná el día:
+                  </p>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((label, i) => {
+                      const d = new Date(getMondayWithOffset(weekOffset));
+                      d.setUTCDate(d.getUTCDate() + i);
+                      const isSelected = selectedPastDay === i;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setSelectedPastDay(i)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '999px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            border: isSelected ? '1px solid rgba(189,157,255,0.6)' : '1px solid rgba(255,255,255,0.1)',
+                            background: isSelected ? 'rgba(189,157,255,0.15)' : 'rgba(255,255,255,0.04)',
+                            color: isSelected ? '#bd9dff' : '#a6aac0',
+                            transition: 'all 0.15s',
+                            fontFamily: 'inherit',
+                          }}
+                        >
+                          {label} {d.getUTCDate()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {rows.map(row => {
-                 const renderIndex = isCurrentWeek ? todayIndex : 0;
+                 // En semana actual: mostrar el día de hoy
+                 // En semana pasada: mostrar el último día con datos, o el domingo (día 6) como default
+                 const renderIndex = isCurrentWeek ? todayIndex : selectedPastDay;
                  const isChecked = Boolean(state[habitKey][row.key][renderIndex]);
                  return (
                     <label key={row.key} className="flex items-center justify-between cursor-pointer group/item">
