@@ -25,32 +25,45 @@ const TRACKER_CONFIG = {
 // DATE UTILITIES
 // ─────────────────────────────────────────────
 
+const BA_TZ = 'America/Argentina/Buenos_Aires';
+
+// Devuelve { year, month (1-12), day, dateStr } en zona BA
+// El weekday se calcula matemáticamente desde una fecha ancla conocida (lunes fijo),
+// para evitar depender de strings localizados que varían por browser/OS.
+function getBADateParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BA_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(date).map(({ type, value }) => [type, value]));
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  // Calcular weekday (0=Dom..6=Sáb) usando epoch math sobre la medianoche UTC del día BA
+  const epochDays = Math.floor(Date.UTC(year, month - 1, day) / 86400000);
+  // 1970-01-01 fue jueves (4). (epochDays + 4) % 7 → 0=Dom
+  const weekday = (epochDays + 4) % 7;
+  return { year, month, day, weekday, dateStr: `${parts.year}-${parts.month}-${parts.day}` };
+}
+
 function getMonday(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const { year, month, day, weekday } = getBADateParts(date);
+  // weekday: 0=domingo, 1=lunes, ..., 6=sábado
+  // Si es domingo (0), retroceder 6 días para llegar al lunes anterior
+  // Si es cualquier otro día, retroceder (weekday - 1) días
+  const daysToMonday = weekday === 0 ? 6 : weekday - 1;
+  return new Date(Date.UTC(year, month - 1, day - daysToMonday));
 }
 
 function formatDay(date) {
-  return new Intl.DateTimeFormat('es-AR', { weekday: 'short', day: '2-digit' }).format(date);
+  return new Intl.DateTimeFormat('es-AR', { timeZone: BA_TZ, weekday: 'short', day: '2-digit' }).format(date);
 }
 
 function formatDateRange(start) {
   const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  const fmt = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short' });
+  end.setUTCDate(end.getUTCDate() + 6);
+  const fmt = new Intl.DateTimeFormat('es-AR', { timeZone: BA_TZ, day: '2-digit', month: 'short' });
   return `Semana ${fmt.format(start)} – ${fmt.format(end)}`;
-}
-
-function weekKey() {
-  const monday = getMonday();
-  const y = monday.getFullYear();
-  const m = String(monday.getMonth() + 1).padStart(2, '0');
-  const d = String(monday.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 function ensureStateShape(state) {
@@ -68,29 +81,27 @@ function ensureStateShape(state) {
 // NEW STORAGE LAYER (clave-por-día)
 // ─────────────────────────────────────────────
 
+// Formatea un Date como YYYY-MM-DD en zona BA
 function formatDateStr(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return getBADateParts(date).dateStr;
 }
 
 function getEffectiveToday() {
+  // Corte de día a las 4am BA: antes de las 4am sigue siendo "ayer"
   const d = new Date(Date.now() - 4 * 60 * 60 * 1000);
-  d.setHours(0, 0, 0, 0);
   return formatDateStr(d);
 }
 
 function getMondayWithOffset(offset = 0) {
-  const d = getMonday();
-  d.setDate(d.getDate() + offset * 7);
-  return d;
+  const monday = getMonday();
+  monday.setUTCDate(monday.getUTCDate() + offset * 7);
+  return monday;
 }
 
 function getDateStrForDay(weekOffset, dayIndex) {
   const monday = getMondayWithOffset(weekOffset);
   const d = new Date(monday);
-  d.setDate(monday.getDate() + dayIndex);
+  d.setUTCDate(monday.getUTCDate() + dayIndex);
   return formatDateStr(d);
 }
 
@@ -129,7 +140,7 @@ function loadWeekStateNew(weekOffset = 0) {
     }
     for (let i = 0; i < 7; i++) {
       const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
+      d.setUTCDate(monday.getUTCDate() + i);
       const dateStr = formatDateStr(d);
       const dayData = getHabitCheck(habitKey, dateStr);
       for (const row of TRACKER_CONFIG[habitKey].rows) {
@@ -149,7 +160,7 @@ function migrateOldData() {
   }
   for (const storKey of keysToMigrate) {
     const mondayStr = storKey.replace('habit-tracker-v2-', '');
-    const monday = new Date(mondayStr + 'T00:00:00');
+    const monday = new Date(mondayStr + 'T12:00:00Z');
     if (isNaN(monday.getTime())) continue;
     try {
       const data = JSON.parse(localStorage.getItem(storKey) || '{}');
@@ -160,7 +171,7 @@ function migrateOldData() {
           dayArray.forEach((checked, dayIndex) => {
             if (checked) {
               const d = new Date(monday);
-              d.setDate(monday.getDate() + dayIndex);
+              d.setUTCDate(monday.getUTCDate() + dayIndex);
               saveHabitCheck(habitKey, row.key, formatDateStr(d), true);
             }
           });
@@ -176,14 +187,14 @@ function migrateOldData() {
 // ─────────────────────────────────────────────
 
 function calcCurrentStreak(habitKey) {
-  let date = new Date(getEffectiveToday() + 'T00:00:00');
+  let date = new Date(getEffectiveToday() + 'T12:00:00Z');
   let streak = 0;
   while (streak <= 365) {
     const dateStr = formatDateStr(date);
     const data = getHabitCheck(habitKey, dateStr);
     if (data.completedCount === 0) break;
     streak++;
-    date.setDate(date.getDate() - 1);
+    date.setUTCDate(date.getUTCDate() - 1);
   }
   return streak;
 }
@@ -200,6 +211,71 @@ function calcWeekStats(checks) {
   }
   const pct = possible === 0 ? 0 : Math.round((done / possible) * 100);
   return { done, possible, pct };
+}
+
+function isDayCompleted(dateStr) {
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.endsWith(dateStr)) {
+      try {
+        const data = JSON.parse(localStorage.getItem(key));
+        if (data.completedCount > 0) return true;
+      } catch { /* skip */ }
+    }
+  }
+  return false;
+}
+
+function MonthlyCard() {
+  const today = getEffectiveToday();
+  const todayDate = new Date(today + 'T12:00:00Z');
+  const year = todayDate.getUTCFullYear();
+  const month = todayDate.getUTCMonth();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const monthName = new Intl.DateTimeFormat('es-AR', { timeZone: BA_TZ, month: 'long', year: 'numeric' }).format(todayDate);
+
+  let completedCount = 0;
+  let elapsedCount = 0;
+
+  const dots = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
+    const dateStr = formatDateStr(d);
+    const isFuture = dateStr > today;
+    const isToday = dateStr === today;
+
+    if (!isFuture) elapsedCount++;
+
+    if (isFuture) {
+      return { day, type: 'future', isToday };
+    }
+    const done = isDayCompleted(dateStr);
+    if (done) completedCount++;
+    return { day, type: done ? 'done' : 'empty', isToday };
+  });
+
+  return (
+    <div className="month-card">
+      <div className="month-card-header">
+        <span className="month-card-label">Progreso mensual</span>
+        <span className="month-card-title" style={{ textTransform: 'capitalize' }}>{monthName}</span>
+      </div>
+      <div className="month-dots">
+        {dots.map(({ day, type, isToday }) => (
+          <div
+            key={day}
+            className={`month-dot month-dot--${type}${isToday ? ' month-dot--today' : ''}`}
+            title={`Día ${day}`}
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+      <div className="month-card-footer">
+        {completedCount} día{completedCount !== 1 ? 's' : ''} completado{completedCount !== 1 ? 's' : ''} de {elapsedCount} transcurrido{elapsedCount !== 1 ? 's' : ''}
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -261,6 +337,7 @@ function StatsRow({ checks }) {
           {pct >= 50 && <div className="stat-card-trend">↑ Por encima del 50%</div>}
         </div>
       </div>
+      <MonthlyCard />
     </div>
   );
 }
@@ -292,7 +369,7 @@ function WeeklyTracker({ habitKey, checks, onCheck, weekOffset, onWeekOffsetChan
   const monday = getMondayWithOffset(weekOffset);
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
+    d.setUTCDate(monday.getUTCDate() + i);
     return d;
   });
 
@@ -345,6 +422,21 @@ function WeeklyTracker({ habitKey, checks, onCheck, weekOffset, onWeekOffsetChan
             disabled={weekOffset >= 0}
             style={{ padding: '3px 10px', minWidth: 'unset' }}
           >›</button>
+          {weekOffset < 0 && (
+            <button
+              onClick={() => onWeekOffsetChange(0)}
+              style={{
+                background: 'rgba(124,58,237,0.2)',
+                border: '1px solid rgba(124,58,237,0.4)',
+                color: '#d8b4fe',
+                borderRadius: '999px',
+                fontSize: '12px',
+                padding: '4px 10px',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >Hoy</button>
+          )}
         </div>
         <span className="status-chip">{tipText}</span>
       </div>
@@ -355,12 +447,16 @@ function WeeklyTracker({ habitKey, checks, onCheck, weekOffset, onWeekOffsetChan
           <strong>Acción</strong>
           {weekOffset === 0 ? 'Semana actual' : weekOffset === -1 ? 'Semana pasada' : `Hace ${Math.abs(weekOffset)} semanas`}
         </div>
-        {days.map((date, i) => (
-          <div key={i} className="tracker-head">
-            <strong>{formatDay(date).replace('.', '')}</strong>
-            {String(date.getDate()).padStart(2, '0')}
-          </div>
-        ))}
+        {days.map((date, i) => {
+          const dateStr = formatDateStr(date);
+          const isToday = dateStr === getEffectiveToday();
+          return (
+            <div key={i} className={`tracker-head${isToday ? ' tracker-head--today' : ''}`}>
+              <strong>{formatDay(date).replace('.', '')}</strong>
+              {String(date.getDate()).padStart(2, '0')}
+            </div>
+          );
+        })}
       </div>
 
       {/* Data rows */}
@@ -881,7 +977,7 @@ export default function App() {
       for (const habitKey of Object.keys(TRACKER_CONFIG)) {
         for (let i = 0; i < 7; i++) {
           const d = new Date(monday);
-          d.setDate(monday.getDate() + i);
+          d.setUTCDate(monday.getUTCDate() + i);
           const dateStr = formatDateStr(d);
           localStorage.removeItem(`habit-check-${habitKey}-${dateStr}`);
         }
@@ -953,16 +1049,31 @@ export default function App() {
           >Sistemas</button>
         </nav>
         <div className="toolbar-actions">
-          <button className="btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}>
-            {theme === 'light' ? '🌙 Modo oscuro' : '☀ Modo claro'}
+          <button className="btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {theme === 'light' ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>
+            )}
+            {theme === 'light' ? 'Modo oscuro' : 'Modo claro'}
           </button>
-          <button className="btn" onClick={handleExport}>⬇ Exportar datos</button>
-          <label className="btn" style={{ cursor: 'pointer' }}>
-            ⬆ Importar
+          <button className="btn" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4-4 4m0 0-4-4m4 4V4"/></svg>
+            Exportar datos
+          </button>
+          <label className="btn" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8 4 4m0 0-4 4m4-4H4"/></svg>
+            Importar
             <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
           </label>
-          <button className="btn success" onClick={handleReset}>↺ Reiniciar semana</button>
-          <button className="btn primary" onClick={() => window.print()}>⬇ Exportar PDF</button>
+          <button className="btn success" onClick={handleReset} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"/></svg>
+            Reiniciar semana
+          </button>
+          <button className="btn primary" onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"/></svg>
+            Exportar PDF
+          </button>
         </div>
       </div>
 
