@@ -1,64 +1,41 @@
 @import "tailwindcss";
 
+@theme {
+  --color-surface: #0b1020;
+  --color-on-surface: #e0e4fb;
+  --color-on-surface-variant: #a6aac0;
+  --color-primary: #bd9dff;
+  --color-secondary: #6bff8f;
+  --color-secondary-container: #006e2f;
+  --color-outline: #707589;
+  --color-surface-dim: #0b1020;
+  --color-on-secondary: #005f28;
+
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
 :root {
   --bg: #0b1020;
-  --bg2: #121932;
-  --panel: #161f3f;
-  --panel-2: #1c2750;
-  --surface: #0f1630;
-  --text: #eef2ff;
-  --muted: #aab4d6;
+  --text: #e0e4fb;
+  --muted: #a6aac0;
   --line: #2a376b;
-  --accent: #7c3aed;
-  --accent-2: #22c55e;
-  --accent-3: #38bdf8;
-  --accent-4: #f59e0b;
-  --danger: #fb7185;
-  --shadow: 0 20px 60px rgba(0,0,0,.35);
-  --radius: 18px;
-  --radius-sm: 12px;
-  --max: 1240px;
+  --accent: #bd9dff;
+  --accent-2: #6bff8f;
   --hero-border: rgba(255,255,255,.07);
-  --hero-bg: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
-  --card-bg: var(--panel);
-  --nav-bg: rgba(11,16,32,.72);
+  --hero-bg: rgba(22, 31, 63, 0.6);
+  --card-bg: rgba(22, 31, 63, 0.6);
   --pill-bg: rgba(255,255,255,.05);
-  --table-head: rgba(255,255,255,.04);
-  --good-bg: rgba(34,197,94,.16);
-  --good-text: #86efac;
-  --warning-bg: rgba(245,158,11,.12);
-  --warning-text: #fde68a;
-  --info-bg: rgba(56,189,248,.08);
-  --info-text: #cbefff;
+  --max: 1152px;
 }
 
 body.light {
+  /* Ignorado u opcional si la nueva ref de diseño es solo oscura, pero mantengo variables legacy funcionales */
   --bg: #f4f7ff;
-  --bg2: #ffffff;
-  --panel: #ffffff;
-  --panel-2: #f6f8ff;
-  --surface: #edf2ff;
   --text: #16213f;
   --muted: #5e6c8f;
   --line: #d7def2;
   --accent: #6d28d9;
   --accent-2: #16a34a;
-  --accent-3: #0284c7;
-  --accent-4: #d97706;
-  --danger: #e11d48;
-  --shadow: 0 18px 44px rgba(58,79,120,.12);
-  --hero-border: rgba(22,33,63,.08);
-  --hero-bg: linear-gradient(180deg, rgba(255,255,255,.96), rgba(247,249,255,.9));
-  --card-bg: var(--panel);
-  --nav-bg: rgba(255,255,255,.82);
-  --pill-bg: rgba(22,33,63,.045);
-  --table-head: rgba(109,40,217,.06);
-  --good-bg: rgba(34,197,94,.12);
-  --good-text: #15803d;
-  --warning-bg: rgba(245,158,11,.12);
-  --warning-text: #a16207;
-  --info-bg: rgba(56,189,248,.12);
-  --info-text: #075985;
 }
 
 * { box-sizing: border-box; }
@@ -66,15 +43,38 @@ html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  background:
-    radial-gradient(circle at top left, rgba(124,58,237,.14), transparent 32%),
-    radial-gradient(circle at top right, rgba(56,189,248,.10), transparent 28%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg) 78%, #090d1a 22%), var(--bg));
-  color: var(--text);
+  font-family: var(--font-body);
+  background-color: #0b1020;
+  background-image: 
+      radial-gradient(circle at 10% 10%, rgba(189, 157, 255, 0.08) 0%, transparent 40%),
+      radial-gradient(circle at 90% 90%, rgba(107, 255, 143, 0.05) 0%, transparent 40%);
+  min-height: 100vh;
+  color: #e0e4fb;
   line-height: 1.55;
   transition: background .25s ease, color .25s ease;
 }
+
+.glass-card {
+  background: rgba(22, 31, 63, 0.6);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.progress-glow {
+  box-shadow: 0 0 10px rgba(107, 255, 143, 0.3);
+}
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.nav-pill {
+  background: rgba(11, 16, 32, 0.45);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+
+
 
 .wrap { max-width: var(--max); margin: 0 auto; padding: 32px 20px 72px; }
 
@@ -547,7 +547,7 @@ tr:last-child td { border-bottom: none; }
 
 /* ─── MONTHLY CARD ─── */
 .month-card {
-  grid-column: 1 / -1;
+  width: 100%;
   background: rgba(22, 31, 63, 0.6);
   border: 1px solid var(--hero-border);
   border-radius: 28px;
@@ -665,6 +665,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 @media (max-width: 720px) {
+  .habit-cards-grid { grid-template-columns: 1fr !important; }
   .wrap { padding: 18px 14px 48px; }
   .hero { padding: 20px; }
   .habit-head { padding: 20px; }

@@ -230,51 +230,184 @@ function MonthlyCard() {
   const today = getEffectiveToday();
   const todayDate = new Date(today + 'T12:00:00Z');
   const year = todayDate.getUTCFullYear();
-  const month = todayDate.getUTCMonth();
-  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const monthName = new Intl.DateTimeFormat('es-AR', { timeZone: BA_TZ, month: 'long', year: 'numeric' }).format(todayDate);
 
-  let completedCount = 0;
-  let elapsedCount = 0;
+  // Empezar desde el lunes de la semana que contiene el 1 de enero
+  const jan1 = new Date(Date.UTC(year, 0, 1, 12, 0, 0));
+  const jan1Weekday = getBADateParts(jan1).weekday; // 0=dom,1=lun..6=sab
+  const daysToMonday = jan1Weekday === 0 ? 6 : jan1Weekday - 1;
+  const gridStart = new Date(jan1);
+  gridStart.setUTCDate(jan1.getUTCDate() - daysToMonday);
 
-  const dots = Array.from({ length: daysInMonth }, (_, i) => {
-    const day = i + 1;
-    const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
-    const dateStr = formatDateStr(d);
-    const isFuture = dateStr > today;
-    const isToday = dateStr === today;
-
-    if (!isFuture) elapsedCount++;
-
-    if (isFuture) {
-      return { day, type: 'future', isToday };
+  // Generar todos los dots desde gridStart hasta hoy
+  const dots = [];
+  let current = new Date(gridStart);
+  while (formatDateStr(current) <= today) {
+    const dateStr = formatDateStr(current);
+    const currentMonth = current.getUTCMonth();
+    const isThisYear = current.getUTCFullYear() === year;
+    
+    let type = 'outside'; // fuera del año actual
+    if (isThisYear) {
+      const madrugarCount = getHabitCheck('madrugar', dateStr).completedCount;
+      const cocinaCount = getHabitCheck('cocina', dateStr).completedCount;
+      const doneCount = madrugarCount + cocinaCount;
+      const totalCount = TRACKER_CONFIG.madrugar.rows.length + TRACKER_CONFIG.cocina.rows.length;
+      if (doneCount === totalCount && doneCount > 0) type = 'total';
+      else if (doneCount > 0) type = 'parcial';
+      else type = 'empty';
     }
-    const done = isDayCompleted(dateStr);
-    if (done) completedCount++;
-    return { day, type: done ? 'done' : 'empty', isToday };
-  });
+    
+    dots.push({ 
+      id: dateStr, 
+      type, 
+      dateStr,
+      month: current.getUTCMonth(),
+      isToday: dateStr === today,
+    });
+    current = new Date(current);
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  // Calcular labels de meses
+  const totalCols = Math.ceil(dots.length / 7);
+  const monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const monthLabels = [];
+  let lastMonth = -1;
+  for (let col = 0; col < totalCols; col++) {
+    const dot = dots[col * 7];
+    if (dot && dot.type !== 'outside') {
+      const m = new Date(dot.dateStr + 'T12:00:00Z').getUTCMonth();
+      if (m !== lastMonth) {
+        monthLabels.push({ col, label: monthNames[m] });
+        lastMonth = m;
+      }
+    }
+  }
+
+  const DOT = 11;  // tamaño del dot en px
+  const GAP = 4;   // gap entre dots en px
+  const STEP = DOT + GAP; // 15px por celda
+
+  const dotColor = (type, isToday) => {
+    if (type === 'outside') return 'transparent';
+    if (type === 'total') return '#6bff8f';
+    if (type === 'parcial') return 'rgba(107,255,143,0.3)';
+    return 'rgba(255,255,255,0.07)';
+  };
+
+  const dotGlow = (type) => {
+    if (type === 'total') return '0 0 6px rgba(107,255,143,0.4)';
+    return 'none';
+  };
 
   return (
-    <div className="month-card">
-      <div className="month-card-header">
-        <span className="month-card-label">Progreso mensual</span>
-        <span className="month-card-title" style={{ textTransform: 'capitalize' }}>{monthName}</span>
+    <section style={{
+      background: 'rgba(22,31,63,0.6)',
+      backdropFilter: 'blur(14px)',
+      WebkitBackdropFilter: 'blur(14px)',
+      border: '1px solid rgba(255,255,255,0.07)',
+      borderRadius: '24px',
+      padding: '28px 32px',
+      marginTop: '32px',
+      width: '100%',
+      boxSizing: 'border-box',
+    }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <p style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.25em', color: '#a6aac0', margin: '0 0 4px' }}>
+            Consistencia {year}
+          </p>
+          <span style={{ fontSize: '18px', fontWeight: 700, color: '#e0e4fb' }}>
+            {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][todayDate.getUTCMonth()]} {year}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+          {[
+            { color: 'rgba(255,255,255,0.07)', label: 'Sin datos' },
+            { color: 'rgba(107,255,143,0.3)', label: 'Parcial' },
+            { color: '#6bff8f', label: 'Total', glow: '0 0 6px rgba(107,255,143,0.4)' },
+          ].map(item => (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ width: '10px', height: '10px', borderRadius: '3px', background: item.color, boxShadow: item.glow || 'none', flexShrink: 0 }} />
+              <span style={{ fontSize: '9px', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.08em', color: '#a6aac0', whiteSpace: 'nowrap' }}>{item.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="month-dots">
-        {dots.map(({ day, type, isToday }) => (
-          <div
-            key={day}
-            className={`month-dot month-dot--${type}${isToday ? ' month-dot--today' : ''}`}
-            title={`Día ${day}`}
-          >
-            {day}
+
+      {/* Grid */}
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <div style={{ display: 'inline-block', minWidth: '100%' }}>
+
+          {/* Labels de meses — posicionados absolutamente sobre el grid */}
+          <div style={{ position: 'relative', height: '18px', marginLeft: '28px', marginBottom: '4px' }}>
+            {monthLabels.map(({ col, label }) => (
+              <span key={label} style={{
+                position: 'absolute',
+                left: `${col * STEP}px`,
+                fontSize: '10px',
+                fontWeight: 700,
+                color: '#a6aac0',
+                whiteSpace: 'nowrap',
+                lineHeight: '18px',
+              }}>
+                {label}
+              </span>
+            ))}
           </div>
-        ))}
+
+          {/* Días + dots */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+
+            {/* Labels L M M J V S D */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: `${GAP}px`, paddingTop: '0', flexShrink: 0, width: '22px' }}>
+              {['Lun','','Mié','','Vie','','Dom'].map((d, i) => (
+                <div key={i} style={{
+                  height: `${DOT}px`,
+                  fontSize: '9px',
+                  color: '#a6aac0',
+                  fontWeight: 600,
+                  lineHeight: `${DOT}px`,
+                  textAlign: 'right',
+                  whiteSpace: 'nowrap',
+                }}>{d}</div>
+              ))}
+            </div>
+
+            {/* Dot grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateRows: `repeat(7, ${DOT}px)`,
+              gridAutoFlow: 'column',
+              gridAutoColumns: `${DOT}px`,
+              gap: `${GAP}px`,
+            }}>
+              {dots.map(dot => (
+                <div
+                  key={dot.id}
+                  title={dot.dateStr}
+                  style={{
+                    width: `${DOT}px`,
+                    height: `${DOT}px`,
+                    borderRadius: '3px',
+                    background: dotColor(dot.type),
+                    boxShadow: dot.isToday 
+                      ? '0 0 0 1.5px #bd9dff' 
+                      : dotGlow(dot.type),
+                    transition: 'transform 0.1s',
+                    flexShrink: 0,
+                  }}
+                />
+              ))}
+            </div>
+
+          </div>
+        </div>
       </div>
-      <div className="month-card-footer">
-        {completedCount} día{completedCount !== 1 ? 's' : ''} completado{completedCount !== 1 ? 's' : ''} de {elapsedCount} transcurrido{elapsedCount !== 1 ? 's' : ''}
-      </div>
-    </div>
+
+    </section>
   );
 }
 
@@ -286,59 +419,23 @@ function StatsRow({ checks }) {
   const { done, possible, pct } = calcWeekStats(checks);
   const bestStreak = Math.max(calcCurrentStreak('madrugar'), calcCurrentStreak('cocina'));
   return (
-    <div className="stat-section">
-      <div className="stat-card">
-        <div className="stat-card-top">
-          <div>
-            <span className="stat-card-label">Volumen</span>
-            <span className="stat-card-title">Checks esta semana</span>
-          </div>
-          <div className="stat-card-icon" style={{ color: '#a78bfa' }}>📊</div>
-        </div>
-        <div>
-          <div className="stat-card-value">
-            <span className="stat-card-number">{done}</span>
-            <span className="stat-card-unit">/ {possible}</span>
-          </div>
-          {done > 0 && <div className="stat-card-trend">↑ {pct}% de completitud</div>}
+    <header className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-16">
+      <div className="space-y-1">
+        <p style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#a6aac0', whiteSpace: 'nowrap' }}>Checks esta semana</p>
+        <p style={{ fontSize: '60px', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: 'white' }}>{done}</p>
+      </div>
+      <div className="space-y-1">
+        <p style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#a6aac0', whiteSpace: 'nowrap' }}>Racha actual</p>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <span style={{ fontSize: '60px', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: '#bd9dff' }}>{bestStreak}</span>
+          <span style={{ fontSize: '20px', fontWeight: 500, color: '#a6aac0' }}>días</span>
         </div>
       </div>
-
-      <div className="stat-card">
-        <div className="stat-card-top">
-          <div>
-            <span className="stat-card-label">Consistencia</span>
-            <span className="stat-card-title">Racha actual</span>
-          </div>
-          <div className="stat-card-icon" style={{ color: '#fbbf24' }}>⚡</div>
-        </div>
-        <div>
-          <div className="stat-card-value">
-            <span className="stat-card-number">{bestStreak}</span>
-            <span className="stat-card-unit">días</span>
-          </div>
-          {bestStreak > 0 && <div className="stat-card-trend">↑ Sin cortar la racha</div>}
-        </div>
+      <div className="space-y-1">
+        <p style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#a6aac0', whiteSpace: 'nowrap' }}>Completitud semanal</p>
+        <p style={{ fontSize: '60px', fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: '#6bff8f' }}>{pct}%</p>
       </div>
-
-      <div className="stat-card">
-        <div className="stat-card-top">
-          <div>
-            <span className="stat-card-label">Eficiencia</span>
-            <span className="stat-card-title">Completitud semanal</span>
-          </div>
-          <div className="stat-card-icon" style={{ color: '#38bdf8' }}>🎯</div>
-        </div>
-        <div>
-          <div className="stat-card-value">
-            <span className="stat-card-number">{pct}</span>
-            <span className="stat-card-unit">%</span>
-          </div>
-          {pct >= 50 && <div className="stat-card-trend">↑ Por encima del 50%</div>}
-        </div>
-      </div>
-      <MonthlyCard />
-    </div>
+    </header>
   );
 }
 
@@ -346,151 +443,116 @@ function StatsRow({ checks }) {
 // PROGRESS CARD
 // ─────────────────────────────────────────────
 
-function ProgressCard({ title, done, total }) {
-  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
-  return (
-    <div className="progress-card">
-      <div className="progress-top">
-        <div className="title">{title}</div>
-        <div className="val">{done}/{total} · {pct}%</div>
-      </div>
-      <div className="progress-bar">
-        <div className="progress-fill" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
+const NewHabitCard = ({ habitKey, activeTab, weekOffset, onWeekOffsetChange, checks, onCheck, children }) => {
+  if (activeTab === 'sistemas') {
+     return children;
+  }
+  if (activeTab === 'dashboard') {
+     const streak = calcCurrentStreak(habitKey);
+     const title = habitKey === 'madrugar' ? 'MAÑANA' : 'ENFOQUE';
+     const headerClass = habitKey === 'madrugar' ? 'bg-gradient-to-r from-[#8a4cfc] to-[#bd9dff]/40' : 'bg-gradient-to-r from-secondary-container to-secondary/40';
+     
+     const cfg = TRACKER_CONFIG[habitKey];
+     const state = ensureStateShape(checks);
+     const rows = cfg.rows;
+     
+     const monday = getMondayWithOffset(weekOffset);
+     const todayStr = getEffectiveToday();
+     const todayIndex = Array.from({ length: 7 }).findIndex((_, i) => {
+       const d = new Date(monday); d.setUTCDate(monday.getUTCDate() + i);
+       return formatDateStr(d) === todayStr;
+     });
+     const isCurrentWeek = todayIndex !== -1;
+     
+     let doneTotal = 0;
+     rows.forEach(row => { (state[habitKey][row.key] || []).forEach(v => { if (v) doneTotal++; }); });
+     const total = rows.length * 7;
+     const pct = total === 0 ? 0 : Math.round((doneTotal / total) * 100);
 
-// ─────────────────────────────────────────────
-// WEEKLY TRACKER
-// ─────────────────────────────────────────────
+     const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-function WeeklyTracker({ habitKey, checks, onCheck, weekOffset, onWeekOffsetChange }) {
-  const monday = getMondayWithOffset(weekOffset);
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setUTCDate(monday.getUTCDate() + i);
-    return d;
-  });
-
-  const cfg = TRACKER_CONFIG[habitKey];
-  const state = ensureStateShape(checks);
-
-  const rows = cfg.rows;
-  let doneTotal = 0;
-  rows.forEach(row => {
-    (state[habitKey][row.key] || []).forEach(v => { if (v) doneTotal++; });
-  });
-
-  const rowCounts = {};
-  rows.forEach(row => {
-    rowCounts[row.key] = (state[habitKey][row.key] || []).filter(Boolean).length;
-  });
-
-  const progressCards = habitKey === 'madrugar'
-    ? [
-        { title: 'Progreso total de la semana', done: doneTotal, total: rows.length * 7 },
-        { title: 'Celular afuera a horario', done: rowCounts.phone || 0, total: 7 },
-        { title: 'De pie con la primera alarma', done: rowCounts.up || 0, total: 7 },
-      ]
-    : [
-        { title: 'Progreso total de la semana', done: doneTotal, total: rows.length * 7 },
-        { title: 'Cocina lista', done: rowCounts.ready || 0, total: 7 },
-        { title: 'Desayuno preparado', done: rowCounts.breakfast || 0, total: 7 },
-      ];
-
-  const tipText = habitKey === 'madrugar'
-    ? 'Meta mínima: celular afuera + de pie con la primera alarma'
-    : 'Zona mínima: bacha + mesada + desayuno';
-
-  return (
-    <>
-      <div className="status-row">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <button
-            className="btn"
-            onClick={() => onWeekOffsetChange(weekOffset - 1)}
-            disabled={weekOffset <= -4}
-            style={{ padding: '3px 10px', minWidth: 'unset' }}
-          >‹</button>
-          <span className="status-chip" style={{ minWidth: '200px', textAlign: 'center' }}>
-            {weekOffset < 0 ? '✏ ' : ''}{formatDateRange(monday)}
-          </span>
-          <button
-            className="btn"
-            onClick={() => onWeekOffsetChange(weekOffset + 1)}
-            disabled={weekOffset >= 0}
-            style={{ padding: '3px 10px', minWidth: 'unset' }}
-          >›</button>
-          {weekOffset < 0 && (
-            <button
-              onClick={() => onWeekOffsetChange(0)}
-              style={{
-                background: 'rgba(124,58,237,0.2)',
-                border: '1px solid rgba(124,58,237,0.4)',
-                color: '#d8b4fe',
-                borderRadius: '999px',
-                fontSize: '12px',
-                padding: '4px 10px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >Hoy</button>
-          )}
-        </div>
-        <span className="status-chip">{tipText}</span>
-      </div>
-
-      {/* Header row */}
-      <div className="tracker-grid">
-        <div className="tracker-head">
-          <strong>Acción</strong>
-          {weekOffset === 0 ? 'Semana actual' : weekOffset === -1 ? 'Semana pasada' : `Hace ${Math.abs(weekOffset)} semanas`}
-        </div>
-        {days.map((date, i) => {
-          const dateStr = formatDateStr(date);
-          const isToday = dateStr === getEffectiveToday();
-          return (
-            <div key={i} className={`tracker-head${isToday ? ' tracker-head--today' : ''}`}>
-              <strong>{formatDay(date).replace('.', '')}</strong>
-              {String(date.getDate()).padStart(2, '0')}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Data rows */}
-      {cfg.rows.map(row => (
-        <div key={row.key} className="tracker-row tracker-grid">
-          <div className="tracker-label">
-            {row.label}
-            <span>{row.sub}</span>
+     return (
+        <div className="glass-card rounded-lg overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-2xl">
+          <div className={`px-8 py-5 ${headerClass} flex justify-between items-center`}>
+            <h3 className="text-sm font-black tracking-[0.2em] uppercase text-white">{title}</h3>
+            <span className="text-[10px] font-black bg-black/20 px-3 py-1 rounded-full backdrop-blur-sm text-white/90">RACHA: {String(streak).padStart(2, '0')}</span>
           </div>
-          {Array.from({ length: 7 }, (_, i) => (
-            <div key={i} className="tracker-cell">
-              <input
-                type="checkbox"
-                checked={Boolean(state[habitKey]?.[row.key]?.[i])}
-                onChange={e => onCheck(habitKey, row.key, i, e.target.checked, getDateStrForDay(weekOffset, i))}
-                aria-label={`${row.label} día ${i + 1}`}
-              />
+          <div className="p-8 flex flex-col flex-1">
+            <div className={`space-y-6 mb-10 ${!isCurrentWeek ? 'opacity-50 pointer-events-none' : ''}`}>
+              {!isCurrentWeek && <p style={{ fontSize: '10px', color: '#a6aac0', textAlign: 'center', marginBottom: '8px', opacity: 0.6 }}>✏ semana anterior</p>}
+              {rows.map(row => {
+                 const renderIndex = isCurrentWeek ? todayIndex : 0;
+                 const isChecked = Boolean(state[habitKey][row.key][renderIndex]);
+                 return (
+                    <label key={row.key} className="flex items-center justify-between cursor-pointer group/item">
+                      <span className="text-lg font-medium text-on-surface">{row.label}</span>
+                      <input 
+                         type="checkbox" 
+                         className="sr-only peer" 
+                         checked={isChecked}
+                         onChange={e => onCheck(habitKey, row.key, renderIndex, e.target.checked, getDateStrForDay(weekOffset, renderIndex))}
+                      />
+                      <div className={`w-8 h-8 flex items-center justify-center transition-all ${isChecked ? 'progress-glow' : ''} group-hover/item:border-secondary`} style={{ borderRadius: '50%', border: isChecked ? '2px solid #6bff8f' : '2px solid rgba(255,255,255,0.15)', background: isChecked ? 'rgba(107,255,143,0.1)' : 'rgba(255,255,255,0.03)' }}>
+                        <span className={`material-symbols-outlined text-xl ${isChecked ? 'text-secondary' : 'text-transparent'}`} style={isChecked ? {fontVariationSettings: "'FILL' 1"} : {}}>check</span>
+                      </div>
+                    </label>
+                 );
+              })}
             </div>
-          ))}
+            
+            <div className="h-px bg-white/5 w-full mb-8"></div>
+
+            <div style={{ width: '100%' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.3fr repeat(7, 1fr)', gap: '8px', width: '100%' }} className="mb-8">
+                <div className="flex flex-col gap-5 pt-6 text-[10px] font-bold text-on-surface-variant uppercase tracking-tighter">
+                   {rows.map(row => <div key={row.key} className="whitespace-nowrap overflow-hidden text-ellipsis mr-2" style={{ lineHeight: '1.2' }}>{row.label.split(' ').slice(0, 2).join(' ')}</div>)}
+                </div>
+                {weekLabels.map((lbl, i) => {
+                   const isColToday = isCurrentWeek && i === todayIndex;
+                   const isFuture = isCurrentWeek && i > todayIndex;
+                   return (
+                     <div key={i} className={`flex flex-col items-center gap-5 ${isFuture ? 'opacity-40' : ''}`} style={isColToday ? { background: 'rgba(124,58,237,0.35)', padding: '12px 0', marginTop: '-12px', borderRadius: '999px', border: '1px solid rgba(167,139,250,0.5)' } : {}}>
+                        <span className={`text-[0.6rem] font-bold ${isColToday ? 'font-black' : 'text-on-surface-variant'}`} style={isColToday ? { color: '#a78bfa' } : {}}>{lbl}</span>
+                        {rows.map(row => {
+                           const dotChecked = Boolean(state[habitKey][row.key][i]);
+                           return (
+                              <div key={row.key} style={{ width: '8px', height: '8px', borderRadius: '50%', background: dotChecked ? '#6bff8f' : 'rgba(255,255,255,0.05)', boxShadow: dotChecked ? '0 0 10px rgba(107,255,143,0.3)' : 'none' }}></div>
+                           );
+                        })}
+                     </div>
+                   );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-6 border-t border-white/5">
+              <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest mb-3">
+                <span className="text-on-surface-variant">Compleción Semanal</span>
+                <span className="text-on-surface">{pct}%</span>
+              </div>
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mb-4">
+                <div className="h-full bg-secondary progress-glow" style={{width: `${pct}%`, transition: 'width 0.5s'}}></div>
+              </div>
+              <div className="flex justify-center items-center gap-6">
+                <button 
+                  onClick={() => onWeekOffsetChange(weekOffset - 1)}
+                  disabled={weekOffset <= -4}
+                  className="material-symbols-outlined text-sm text-on-surface-variant hover:text-white cursor-pointer"
+                >chevron_left</button>
+                <span className="text-[0.6rem] font-bold uppercase tracking-[0.2em] text-on-surface-variant/60">{formatDateRange(getMondayWithOffset(weekOffset))}</span>
+                <button 
+                  onClick={() => onWeekOffsetChange(weekOffset + 1)}
+                  disabled={weekOffset >= 0}
+                  className="material-symbols-outlined text-sm text-on-surface-variant hover:text-white cursor-pointer"
+                >chevron_right</button>
+              </div>
+            </div>
+
+          </div>
         </div>
-      ))}
-
-      {/* Progress bars */}
-      <div className="progress-wrap">
-        {progressCards.map((pc, i) => (
-          <ProgressCard key={i} title={pc.title} done={pc.done} total={pc.total} />
-        ))}
-      </div>
-
-      <p className="print-tip">
-        Para el PDF: tocá <strong>Exportar PDF</strong> y en la ventana del navegador elegí <strong>Guardar como PDF</strong>.
-      </p>
-    </>
-  );
+     );
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────
@@ -498,9 +560,9 @@ function WeeklyTracker({ habitKey, checks, onCheck, weekOffset, onWeekOffsetChan
 // ─────────────────────────────────────────────
 
 function MadrugarSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetChange }) {
-  const streak = calcCurrentStreak('madrugar');
   return (
-    <section id="madrugar" className="habit">
+    <NewHabitCard habitKey="madrugar" activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={onWeekOffsetChange} checks={checks} onCheck={onCheck}>
+      <section id="madrugar" className="habit">
       <div className="habit-head">
         <div>
           <div className="habit-eyebrow">🌅 Mañanas</div>
@@ -513,23 +575,11 @@ function MadrugarSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetC
             Sistema para proteger la noche, simplificar el cierre del día y ganar la mañana sin depender de fuerza de voluntad.
           </p>
         </div>
-        <span className="streak-badge">RACHA: {String(streak).padStart(2, '0')}</span>
+        <span className="streak-badge">RACHA: {String(calcCurrentStreak('madrugar')).padStart(2, '0')}</span>
       </div>
 
       <div className="grid">
 
-        {/* Tracker */}
-        <div style={{ display: activeTab === 'dashboard' ? 'contents' : 'none' }}>
-          <article className="card cols-12">
-            <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
-            <p className="muted">Tildá sólo lo que realmente hiciste. El progreso se actualiza solo y queda guardado en este navegador.</p>
-            <WeeklyTracker habitKey="madrugar" checks={checks} onCheck={onCheck} weekOffset={weekOffset} onWeekOffsetChange={onWeekOffsetChange} />
-          </article>
-        </div>
-
-        {/* Sistemas Cards */}
-        <div style={{ display: activeTab === 'sistemas' ? 'contents' : 'none' }}>
-          {/* Plan de identidad */}
         <article className="card cols-6">
           <h3><span className="icon">A</span>Plan de identidad</h3>
           <p><strong>Declaración:</strong> Soy un madrugador que protege la noche para ganar la mañana.</p>
@@ -708,10 +758,10 @@ function MadrugarSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetC
             Única modificación de la próxima semana: adelantar 15 minutos la hora de "celular afuera" y no tocar nada más.
           </div>
         </article>
-        </div>
 
       </div>
     </section>
+    </NewHabitCard>
   );
 }
 
@@ -720,9 +770,9 @@ function MadrugarSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetC
 // ─────────────────────────────────────────────
 
 function CocinaSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetChange }) {
-  const streak = calcCurrentStreak('cocina');
   return (
-    <section id="cocina" className="habit">
+    <NewHabitCard habitKey="cocina" activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={onWeekOffsetChange} checks={checks} onCheck={onCheck}>
+      <section id="cocina" className="habit">
       <div className="habit-head kitchen">
         <div>
           <div className="habit-eyebrow">🍳 Orden</div>
@@ -735,23 +785,11 @@ function CocinaSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetCha
             Sistema corto, realista y sin volverte empleado de la casa: bacha, mesada y desayuno listo.
           </p>
         </div>
-        <span className="streak-badge">RACHA: {String(streak).padStart(2, '0')}</span>
+        <span className="streak-badge">RACHA: {String(calcCurrentStreak('cocina')).padStart(2, '0')}</span>
       </div>
 
       <div className="grid">
 
-        {/* Tracker */}
-        <div style={{ display: activeTab === 'dashboard' ? 'contents' : 'none' }}>
-          <article className="card cols-12">
-            <h3><span className="icon">✓</span>Tracker semanal interactivo</h3>
-            <p className="muted">Acá tenés el cierre de cocina convertido en acciones medibles. Lo ideal es no hacerlo perfecto; lo ideal es hacerlo.</p>
-            <WeeklyTracker habitKey="cocina" checks={checks} onCheck={onCheck} weekOffset={weekOffset} onWeekOffsetChange={onWeekOffsetChange} />
-          </article>
-        </div>
-
-        {/* Sistemas Cards */}
-        <div style={{ display: activeTab === 'sistemas' ? 'contents' : 'none' }}>
-          {/* Plan de identidad */}
         <article className="card cols-6">
           <h3><span className="icon">A</span>Plan de identidad</h3>
           <p><strong>Declaración:</strong> Soy un hombre que deja la cocina lista para su mejor mañana.</p>
@@ -929,10 +967,657 @@ function CocinaSection({ checks, onCheck, activeTab, weekOffset, onWeekOffsetCha
             Única modificación de la próxima semana: poner un límite de 10 minutos al cierre y respetar la zona mínima no negociable.
           </div>
         </article>
-        </div>
 
       </div>
     </section>
+    </NewHabitCard>
+  );
+}
+
+// ─────────────────────────────────────────────
+// NUEVO TAB — Generador de sistemas con IA
+// ─────────────────────────────────────────────
+
+const TEMPLATES = {
+  estudio: {
+    tipo: 'Construir',
+    habito: 'Estudiar 30 minutos al día',
+    identidad: 'Soy alguien que aprende todos los días',
+    porQue: 'Quiero crecer profesional y personalmente',
+    lineaBase: 'Estudio esporádicamente, sin rutina fija',
+    friccion1: 'Me distraigo con el celular',
+    friccion2: 'No tengo un horario fijo',
+    friccion3: 'Me canso rápido si el tema es difícil',
+    desencadenantes: 'Después de cenar, en mi escritorio',
+    tiempo: '30 minutos',
+    restricciones: 'Solo tengo tiempo a la noche',
+    entorno: 'Escritorio en mi cuarto, con celular cerca',
+    recompensa: 'Ver un capítulo de serie después',
+    responsabilidad: 'Ninguna por ahora',
+    metricas: ['Sesión iniciada', '30 min completados', 'Repaso rápido hecho'],
+  },
+  orden: {
+    tipo: 'Construir',
+    habito: 'Ordenar mi habitación antes de dormir',
+    identidad: 'Soy alguien que cuida su entorno',
+    porQue: 'Un espacio ordenado me da claridad mental',
+    lineaBase: 'Ordeno solo cuando está muy caótico',
+    friccion1: 'Me da pereza al final del día',
+    friccion2: 'No sé por dónde empezar cuando está desordenado',
+    friccion3: 'Lo postergue hasta que se acumula demasiado',
+    desencadenantes: 'Antes de lavarme los dientes',
+    tiempo: '10 minutos',
+    restricciones: 'Energía baja a la noche',
+    entorno: 'Habitación compartida a veces',
+    recompensa: 'Acostarme en un cuarto ordenado',
+    responsabilidad: 'Ninguna',
+    metricas: ['Ropa en su lugar', 'Escritorio despejado', 'Cama hecha'],
+  },
+  running: {
+    tipo: 'Construir',
+    habito: 'Salir a correr o moverme 20 minutos',
+    identidad: 'Soy alguien activo que cuida su cuerpo',
+    porQue: 'Quiero más energía y salud a largo plazo',
+    lineaBase: 'Me muevo de forma irregular, sin rutina',
+    friccion1: 'No tengo ropa lista',
+    friccion2: 'Me cuesta salir cuando hace frío',
+    friccion3: 'Lo postergo hasta que se hace tarde',
+    desencadenantes: 'Al despertar o al volver a casa',
+    tiempo: '20-30 minutos',
+    restricciones: 'Clima variable, energía irregular',
+    entorno: 'Barrio caminable, parque cerca',
+    recompensa: 'Ducha larga después',
+    responsabilidad: 'Ninguna',
+    metricas: ['Zapatillas puestas', 'Salí de casa', '20 min completados'],
+  },
+  lectura: {
+    tipo: 'Construir',
+    habito: 'Leer 10 páginas por día',
+    identidad: 'Soy alguien que lee todos los días',
+    porQue: 'Quiero aprender más y desconectarme de pantallas',
+    lineaBase: 'Leo cuando tengo ganas, muy irregular',
+    friccion1: 'El celular compite con el libro',
+    friccion2: 'Me quedo dormido leyendo en la cama',
+    friccion3: 'No tengo un momento fijo para leer',
+    desencadenantes: 'Después del desayuno o antes de dormir',
+    tiempo: '15-20 minutos',
+    restricciones: 'Cansancio a la noche',
+    entorno: 'Libro en mesa de noche, celular cerca',
+    recompensa: 'Sentir que aprendí algo',
+    responsabilidad: 'Ninguna',
+    metricas: ['Libro abierto', '10 páginas leídas', 'Nota del aprendizaje'],
+  },
+};
+
+const SYSTEM_PROMPT = `# ROL
+Actúa como coach de "Atomic Habits" y diseñador de sistemas de comportamiento.
+
+# INSTRUCCIÓN CRÍTICA DE FORMATO
+Responde ÚNICAMENTE con un objeto JSON válido. Sin texto antes ni después. Sin markdown. Sin bloques de código. Solo el JSON puro.
+
+El JSON debe seguir exactamente esta estructura:
+{
+  "identityPlan": {
+    "statement": "string",
+    "votes": ["string", "string", "string"],
+    "dailyEvidence": "string"
+  },
+  "onePercent": {
+    "minimumViable": "string",
+    "twoMinuteStarter": "string",
+    "growthPlan": ["string", "string", "string", "string"]
+  },
+  "fourLaws": [
+    {
+      "law": "string",
+      "action": "string",
+      "environmentChange": "string",
+      "script": "string",
+      "badDayPlan": "string"
+    }
+  ],
+  "habitStacking": ["string", "string", "string", "string", "string"],
+  "frictionEngineering": {
+    "reduce": ["string", "string", "string", "string", "string"],
+    "add": ["string", "string", "string", "string", "string"]
+  },
+  "makeAttractive": {
+    "temptationBundling": "string",
+    "socialGravity": "string",
+    "identityReinforcement": "string"
+  },
+  "makeSatisfying": {
+    "immediateReward": "string",
+    "trackingPlan": "string",
+    "celebrationScript": "string"
+  },
+  "failsafe": {
+    "ifThen": ["string", "string", "string"],
+    "neverTwiceRule": "string",
+    "resetRitual": "string"
+  },
+  "weeklyReview": {
+    "metrics": ["string", "string", "string"],
+    "adjustmentQuestions": ["string", "string", "string"],
+    "nextWeekChange": "string"
+  }
+}`;
+
+function buildUserMessage(f) {
+  return `Tipo de hábito: ${f.tipo}
+Hábito: ${f.habito}
+Identidad: ${f.identidad}
+Por qué es importante: ${f.porQue}
+Línea de base actual: ${f.lineaBase || 'No especificada'}
+Mis mayores puntos de fricción:
+- ${f.friccion1}
+- ${f.friccion2 || 'No especificada'}
+- ${f.friccion3 || 'No especificada'}
+Desencadenantes actuales: ${f.desencadenantes || 'No especificados'}
+Tiempo disponible por día: ${f.tiempo || 'No especificado'}
+Restricciones: ${f.restricciones || 'Ninguna'}
+Entorno: ${f.entorno || 'No especificado'}
+Recompensa preferida: ${f.recompensa || 'No especificada'}
+Responsabilidad: ${f.responsabilidad || 'Ninguna'}`;
+}
+
+const EMPTY_FORM = {
+  tipo: 'Construir',
+  habito: '',
+  identidad: '',
+  porQue: '',
+  lineaBase: '',
+  friccion1: '',
+  friccion2: '',
+  friccion3: '',
+  desencadenantes: '',
+  tiempo: '',
+  restricciones: '',
+  entorno: '',
+  recompensa: '',
+  responsabilidad: '',
+};
+
+function NuevoTab({ onSuccess }) {
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [metricas, setMetricas] = useState(['']);
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const applyTemplate = (key) => {
+    const t = TEMPLATES[key];
+    setForm({
+      tipo: t.tipo,
+      habito: t.habito,
+      identidad: t.identidad,
+      porQue: t.porQue,
+      lineaBase: t.lineaBase,
+      friccion1: t.friccion1,
+      friccion2: t.friccion2,
+      friccion3: t.friccion3,
+      desencadenantes: t.desencadenantes,
+      tiempo: t.tiempo,
+      restricciones: t.restricciones,
+      entorno: t.entorno,
+      recompensa: t.recompensa,
+      responsabilidad: t.responsabilidad,
+    });
+    setMetricas([...t.metricas]);
+    setFieldErrors({});
+    setApiError(null);
+  };
+
+  const setField = (key, value) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+    if (fieldErrors[key]) setFieldErrors(prev => ({ ...prev, [key]: null }));
+  };
+
+  const addMetrica = () => {
+    if (metricas.length < 5) setMetricas(prev => [...prev, '']);
+  };
+
+  const removeMetrica = (i) => {
+    setMetricas(prev => prev.filter((_, idx) => idx !== i));
+  };
+
+  const updateMetrica = (i, val) => {
+    setMetricas(prev => prev.map((m, idx) => idx === i ? val : m));
+    if (fieldErrors.metricas) setFieldErrors(prev => ({ ...prev, metricas: null }));
+  };
+
+  const validate = () => {
+    const errs = {};
+    if (!form.tipo) errs.tipo = 'Requerido';
+    if (!form.habito.trim()) errs.habito = 'Requerido';
+    if (!form.identidad.trim()) errs.identidad = 'Requerido';
+    if (!form.porQue.trim()) errs.porQue = 'Requerido';
+    if (!form.friccion1.trim()) errs.friccion1 = 'Requerido';
+    const validMetricas = metricas.filter(m => m.trim());
+    if (validMetricas.length === 0) errs.metricas = 'Agregá al menos una métrica';
+    return errs;
+  };
+
+  const handleGenerate = async () => {
+    const errs = validate();
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      return;
+    }
+    setApiError(null);
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: 'user', parts: [{ text: buildUserMessage(form) }] }],
+            generationConfig: { maxOutputTokens: 4000, temperature: 0.7 },
+          }),
+        }
+      );
+      const data = await response.json();
+      const text = data.candidates[0].content.parts[0].text;
+      const clean = text.replace(/```json|```/g, '').trim();
+      const system = JSON.parse(clean);
+
+      const id = Date.now().toString();
+      const validMetricas = metricas.filter(m => m.trim());
+
+      // Guardar hábito
+      const habits = JSON.parse(localStorage.getItem('ah_habits') || '[]');
+      habits.push({
+        id,
+        tipo: form.tipo,
+        habito: form.habito,
+        identidad: form.identidad,
+        metricas: validMetricas,
+        createdAt: new Date().toISOString(),
+      });
+      localStorage.setItem('ah_habits', JSON.stringify(habits));
+
+      // Guardar sistema
+      const systems = JSON.parse(localStorage.getItem('ah_systems') || '{}');
+      systems[id] = system;
+      localStorage.setItem('ah_systems', JSON.stringify(systems));
+
+      // Limpiar y navegar
+      setForm(EMPTY_FORM);
+      setMetricas(['']);
+      setFieldErrors({});
+      onSuccess();
+    } catch {
+      setApiError('No se pudo generar el sistema. Verificá tu API key o intentá de nuevo.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputStyle = (errKey) => ({
+    width: '100%',
+    background: 'var(--surface)',
+    border: `1px solid ${fieldErrors[errKey] ? 'var(--danger)' : 'var(--line)'}`,
+    borderRadius: '10px',
+    padding: '12px',
+    color: 'var(--text)',
+    fontFamily: 'inherit',
+    fontSize: '14px',
+    outline: 'none',
+    transition: 'border-color .2s',
+    boxSizing: 'border-box',
+  });
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '12px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    color: 'var(--muted)',
+    marginBottom: '6px',
+    letterSpacing: '.04em',
+  };
+
+  const fieldWrap = { display: 'flex', flexDirection: 'column', gap: '0' };
+  const errStyle = { color: 'var(--danger)', fontSize: '12px', marginTop: '4px' };
+
+  return (
+    <div style={{ paddingBottom: '48px' }}>
+
+      {/* Plantillas */}
+      <div style={{
+        background: 'var(--panel)',
+        border: '1px solid var(--line)',
+        borderRadius: '18px',
+        padding: '20px 24px',
+        marginBottom: '20px',
+      }}>
+        <p style={{ margin: '0 0 14px', fontSize: '13px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+          Plantillas rápidas
+        </p>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {[
+            { key: 'estudio', label: '📚 Estudio' },
+            { key: 'orden',   label: '🏠 Orden' },
+            { key: 'running', label: '🏃 Running' },
+            { key: 'lectura', label: '📖 Lectura' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => applyTemplate(key)}
+              style={{
+                padding: '8px 18px',
+                borderRadius: '999px',
+                border: '1px solid var(--line)',
+                background: 'var(--pill-bg)',
+                color: 'var(--text)',
+                fontFamily: 'inherit',
+                fontSize: '14px',
+                cursor: 'pointer',
+                transition: 'all .15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(124,58,237,.18)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'var(--pill-bg)'; e.currentTarget.style.borderColor = 'var(--line)'; }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Formulario */}
+      <div style={{
+        background: 'var(--panel)',
+        border: '1px solid var(--line)',
+        borderRadius: '18px',
+        padding: '24px',
+        marginBottom: '20px',
+      }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: '18px',
+        }}
+          className="nuevo-form-grid"
+        >
+          {/* 1. Tipo */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Tipo de hábito</label>
+            <select
+              value={form.tipo}
+              onChange={e => setField('tipo', e.target.value)}
+              style={{ ...inputStyle('tipo'), cursor: 'pointer' }}
+            >
+              <option value="Construir">Construir</option>
+              <option value="Romper">Romper</option>
+            </select>
+            {fieldErrors.tipo && <span style={errStyle}>{fieldErrors.tipo}</span>}
+          </div>
+
+          {/* 2. Hábito */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Hábito *</label>
+            <input
+              type="text"
+              value={form.habito}
+              onChange={e => setField('habito', e.target.value)}
+              placeholder="ej: Estudiar 30 minutos al día"
+              style={inputStyle('habito')}
+            />
+            {fieldErrors.habito && <span style={errStyle}>{fieldErrors.habito}</span>}
+          </div>
+
+          {/* 3. Identidad */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Identidad *</label>
+            <input
+              type="text"
+              value={form.identidad}
+              onChange={e => setField('identidad', e.target.value)}
+              placeholder="ej: Soy alguien que aprende todos los días"
+              style={inputStyle('identidad')}
+            />
+            {fieldErrors.identidad && <span style={errStyle}>{fieldErrors.identidad}</span>}
+          </div>
+
+          {/* 4. Por qué */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Por qué es importante *</label>
+            <input
+              type="text"
+              value={form.porQue}
+              onChange={e => setField('porQue', e.target.value)}
+              placeholder="ej: Quiero crecer profesionalmente"
+              style={inputStyle('porQue')}
+            />
+            {fieldErrors.porQue && <span style={errStyle}>{fieldErrors.porQue}</span>}
+          </div>
+
+          {/* 5. Línea de base */}
+          <div style={{ ...fieldWrap, gridColumn: 'span 2' }}>
+            <label style={labelStyle}>Línea de base actual</label>
+            <textarea
+              value={form.lineaBase}
+              onChange={e => setField('lineaBase', e.target.value)}
+              placeholder="ej: Estudio esporádicamente, sin rutina fija"
+              rows={2}
+              style={{ ...inputStyle('lineaBase'), resize: 'vertical' }}
+            />
+          </div>
+
+          {/* 6. Fricción 1 */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Fricción 1 *</label>
+            <input
+              type="text"
+              value={form.friccion1}
+              onChange={e => setField('friccion1', e.target.value)}
+              placeholder="ej: Me distraigo con el celular"
+              style={inputStyle('friccion1')}
+            />
+            {fieldErrors.friccion1 && <span style={errStyle}>{fieldErrors.friccion1}</span>}
+          </div>
+
+          {/* 7. Fricción 2 */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Fricción 2</label>
+            <input
+              type="text"
+              value={form.friccion2}
+              onChange={e => setField('friccion2', e.target.value)}
+              placeholder="ej: No tengo un horario fijo"
+              style={inputStyle('friccion2')}
+            />
+          </div>
+
+          {/* 8. Fricción 3 */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Fricción 3</label>
+            <input
+              type="text"
+              value={form.friccion3}
+              onChange={e => setField('friccion3', e.target.value)}
+              placeholder="ej: Me canso rápido si el tema es difícil"
+              style={inputStyle('friccion3')}
+            />
+          </div>
+
+          {/* 9. Desencadenantes */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Desencadenantes</label>
+            <textarea
+              value={form.desencadenantes}
+              onChange={e => setField('desencadenantes', e.target.value)}
+              placeholder="ej: Después de cenar, en mi escritorio"
+              rows={2}
+              style={{ ...inputStyle('desencadenantes'), resize: 'vertical' }}
+            />
+          </div>
+
+          {/* 10. Tiempo */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Tiempo disponible / día</label>
+            <input
+              type="text"
+              value={form.tiempo}
+              onChange={e => setField('tiempo', e.target.value)}
+              placeholder="ej: 30 minutos"
+              style={inputStyle('tiempo')}
+            />
+          </div>
+
+          {/* 11. Restricciones */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Restricciones</label>
+            <textarea
+              value={form.restricciones}
+              onChange={e => setField('restricciones', e.target.value)}
+              placeholder="ej: Solo tengo tiempo a la noche"
+              rows={2}
+              style={{ ...inputStyle('restricciones'), resize: 'vertical' }}
+            />
+          </div>
+
+          {/* 12. Entorno */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Entorno</label>
+            <textarea
+              value={form.entorno}
+              onChange={e => setField('entorno', e.target.value)}
+              placeholder="ej: Escritorio en mi cuarto, con celular cerca"
+              rows={2}
+              style={{ ...inputStyle('entorno'), resize: 'vertical' }}
+            />
+          </div>
+
+          {/* 13. Recompensa */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Recompensa preferida</label>
+            <input
+              type="text"
+              value={form.recompensa}
+              onChange={e => setField('recompensa', e.target.value)}
+              placeholder="ej: Ver un capítulo de serie después"
+              style={inputStyle('recompensa')}
+            />
+          </div>
+
+          {/* 14. Responsabilidad */}
+          <div style={fieldWrap}>
+            <label style={labelStyle}>Responsabilidad</label>
+            <input
+              type="text"
+              value={form.responsabilidad}
+              onChange={e => setField('responsabilidad', e.target.value)}
+              placeholder="ej: Ninguna por ahora"
+              style={inputStyle('responsabilidad')}
+            />
+          </div>
+        </div>
+
+        {/* Métricas */}
+        <div style={{ marginTop: '24px', borderTop: '1px solid var(--line)', paddingTop: '20px' }}>
+          <label style={{ ...labelStyle, marginBottom: '4px' }}>Métricas de seguimiento</label>
+          <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--muted)' }}>
+            Aparecerán en el tracker · mínimo 1, máximo 5
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {metricas.map((m, i) => (
+              <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={m}
+                  onChange={e => updateMetrica(i, e.target.value)}
+                  placeholder="ej: Celular afuera del cuarto"
+                  style={{ ...inputStyle('metricas'), flex: 1 }}
+                />
+                {metricas.length > 1 && (
+                  <button
+                    onClick={() => removeMetrica(i)}
+                    style={{
+                      width: '32px', height: '32px', borderRadius: '50%',
+                      border: '1px solid var(--line)', background: 'var(--surface)',
+                      color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit',
+                      fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >×</button>
+                )}
+              </div>
+            ))}
+          </div>
+          {fieldErrors.metricas && <span style={errStyle}>{fieldErrors.metricas}</span>}
+          {metricas.length < 5 && (
+            <button
+              onClick={addMetrica}
+              style={{
+                marginTop: '10px',
+                padding: '6px 16px',
+                borderRadius: '999px',
+                border: '1px solid var(--line)',
+                background: 'var(--pill-bg)',
+                color: 'var(--muted)',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: '13px',
+              }}
+            >+ Agregar métrica</button>
+          )}
+        </div>
+      </div>
+
+      {/* Botón generar */}
+      {apiError && (
+        <p style={{ color: 'var(--danger)', fontSize: '14px', margin: '0 0 12px' }}>{apiError}</p>
+      )}
+      <button
+        onClick={handleGenerate}
+        disabled={loading}
+        style={{
+          width: '100%',
+          background: loading ? 'rgba(124,58,237,.4)' : 'linear-gradient(135deg, #7c3aed, #8b5cf6)',
+          border: 'none',
+          borderRadius: '12px',
+          padding: '16px',
+          color: 'white',
+          fontSize: '16px',
+          fontWeight: 700,
+          fontFamily: 'inherit',
+          cursor: loading ? 'not-allowed' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '10px',
+          transition: 'opacity .2s',
+        }}
+      >
+        {loading ? (
+          <>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            Generando tu sistema...
+          </>
+        ) : (
+          '✨ Generar sistema con IA'
+        )}
+      </button>
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @media (max-width: 720px) {
+          .nuevo-form-grid { grid-template-columns: 1fr !important; }
+          .nuevo-form-grid > div[style*="span 2"] { grid-column: span 1 !important; }
+        }
+        .nuevo-form-grid input:focus,
+        .nuevo-form-grid textarea:focus,
+        .nuevo-form-grid select:focus {
+          border-color: var(--accent) !important;
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -1035,47 +1720,43 @@ export default function App() {
   return (
     <div className="wrap">
 
-      {/* ── Toolbar ── */}
-      <div className="toolbar">
-        <nav className="topnav">
-          <span style={{ fontWeight: 'bold', padding: '10px 14px', color: 'var(--text)', display: 'flex', alignItems: 'center' }}>🌿 ATOMIC</span>
+      {/* Floating Navbar */}
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between w-[90%] max-w-2xl px-6 py-3 nav-pill rounded-full shadow-2xl transition-all">
+        <div className="flex items-center">
+          <span className="text-sm font-black tracking-[0.2em] uppercase text-on-surface">HABITUS</span>
+        </div>
+        <div className="flex gap-6 items-center">
           <button 
-            className={`tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
+             onClick={() => setActiveTab('dashboard')} 
+             className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${activeTab === 'dashboard' ? 'text-primary border-b-2 border-primary pb-0.5' : 'text-on-surface-variant hover:text-on-surface'}`}
           >Dashboard</button>
           <button 
-            className={`tab-btn ${activeTab === 'sistemas' ? 'active' : ''}`}
-            onClick={() => setActiveTab('sistemas')}
+             onClick={() => setActiveTab('sistemas')}
+             className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${activeTab === 'sistemas' ? 'text-primary border-b-2 border-primary pb-0.5' : 'text-on-surface-variant hover:text-on-surface'}`}
           >Sistemas</button>
-        </nav>
-        <div className="toolbar-actions">
-          <button className="btn" onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {theme === 'light' ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>
-            )}
-            {theme === 'light' ? 'Modo oscuro' : 'Modo claro'}
-          </button>
-          <button className="btn" onClick={handleExport} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4-4 4m0 0-4-4m4 4V4"/></svg>
-            Exportar datos
-          </button>
-          <label className="btn" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8 4 4m0 0-4 4m4-4H4"/></svg>
-            Importar
-            <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
-          </label>
-          <button className="btn success" onClick={handleReset} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"/></svg>
-            Reiniciar semana
-          </button>
-          <button className="btn primary" onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"/></svg>
-            Exportar PDF
-          </button>
+          <button 
+             onClick={() => setActiveTab('nuevo')}
+             className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${activeTab === 'nuevo' ? 'text-primary border-b-2 border-primary pb-0.5' : 'text-on-surface-variant hover:text-on-surface'}`}
+          >Nuevo</button>
         </div>
-      </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="material-symbols-outlined text-on-surface-variant hover:text-on-surface text-lg">dark_mode</button>
+          
+          <div className="relative group/menu">
+            <button className="material-symbols-outlined text-on-surface-variant hover:text-on-surface text-lg">more_vert</button>
+            <div className="absolute right-0 mt-2 w-48 bg-surface-variant rounded-xl border border-white/10 shadow-xl opacity-0 invisible group-hover/menu:opacity-100 group-hover/menu:visible transition-all flex flex-col overflow-hidden">
+               <button className="px-4 py-3 text-left text-xs font-semibold hover:bg-white/5 text-on-surface" onClick={handleExport}>Exportar JSON</button>
+               <button className="px-4 py-3 text-left text-xs font-semibold hover:bg-white/5 text-on-surface" onClick={handleReset}>Reiniciar semana</button>
+               <label className="px-4 py-3 text-left text-xs font-semibold hover:bg-white/5 text-on-surface cursor-pointer">
+                  Importar JSON
+                  <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+               </label>
+            </div>
+          </div>
+        </div>
+      </nav>
+      {/* Spacer for fixed nav */}
+      <div className="h-24"></div>
 
       {/* ── Banner primera visita ── */}
       {showBanner && activeTab === 'dashboard' && (
@@ -1101,35 +1782,31 @@ export default function App() {
         <div style={{ color: 'red', padding: '8px 0', fontSize: '13px' }}>{importError}</div>
       )}
 
+      {/* ── Tab Nuevo ── */}
+      {activeTab === 'nuevo' && (
+        <NuevoTab onSuccess={() => setActiveTab('dashboard')} />
+      )}
+
       {/* ── Stats row (dashboard only) ── */}
       {activeTab === 'dashboard' && <StatsRow checks={checks} />}
 
       {/* ── Habit sections ── */}
-      <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
-      <CocinaSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
+      {activeTab === 'dashboard' && (
+        <>
+          <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', width: '100%', marginBottom: '64px' }} className="habit-cards-grid">
+            <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
+            <CocinaSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
+          </section>
+          <MonthlyCard />
+        </>
+      )}
+      {activeTab === 'sistemas' && (
+        <>
+          <MadrugarSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
+          <CocinaSection checks={checks} onCheck={handleCheck} activeTab={activeTab} weekOffset={weekOffset} onWeekOffsetChange={setWeekOffset} />
+        </>
+      )}
 
-      {/* ── Cómo usarlo ── */}
-      <section id="como" className="hero" style={{ marginTop: '22px', display: activeTab === 'dashboard' ? 'block' : 'none' }}>
-        <span className="eyebrow">Cómo usarlo</span>
-        <h2 style={{ margin: '16px 0 10px', fontSize: '32px' }}>Qué hace esta versión 2</h2>
-        <div className="grid" style={{ padding: 0, marginTop: '10px' }}>
-          <div className="card cols-4">
-            <h3><span className="icon">✓</span>Checkboxes reales</h3>
-            <p className="muted">Cada semana tiene checks por día y por acción. Se guardan automáticamente en el navegador.</p>
-          </div>
-          <div className="card cols-4">
-            <h3><span className="icon">⏰</span>Barras de progreso</h3>
-            <p className="muted">Hay progreso total y progreso por métrica clave para que veas rápido si vas bien o te estás chamuyando solo.</p>
-          </div>
-          <div className="card cols-4">
-            <h3><span className="icon">✨</span>Claro / Oscuro + PDF</h3>
-            <p className="muted">Podés alternar entre temas. Y para exportar, el botón abre la impresión del navegador lista para guardar PDF.</p>
-          </div>
-        </div>
-        <div className="footer-note">
-          Si querés una versión 3, el salto lógico sería: <strong>estadísticas mensuales, racha automática, notas por día y plantillas para más hábitos</strong>.
-        </div>
-      </section>
 
     </div>
   );
